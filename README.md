@@ -5,25 +5,31 @@
 This code is for Matrix and Vector calculation.
 
 This code has "Ratio" type. It has sign bit, unsigned long long denominator and numerator.
+
 +,-,*,/ operation is defined.
+
+
 
 You can use this Ratio type to calculate exact value (bounded by unsigned long long).
 
 Unfortunately, Ratio type cannot handle square root. For example, 2^(1/2) or 3^(3.4).
+
 This is very unfortunate since QR decomposition and Eigenvalues usually require square root.
+
 For these applications, you need to use long double type.
 
 
 
 ----------------------
-
+-----------------------
 
 This code includes following functions.
 
 For Ratio type :
 
-normalize(), Ratio_print(), Ratio_power(), 
 <, <=, >, >=, ==, !=, *, /, +, -
+
+normalize(), Ratio_print(), Ratio_power()
 
 -----------------------
 
