@@ -6,7 +6,6 @@ This code is for Matrix and Vector calculation.
 
 This code has "Ratio" type. It has sign bit, unsigned long long denominator and numerator.
 
-+,-,*,/ operation is defined.
 
 
 
