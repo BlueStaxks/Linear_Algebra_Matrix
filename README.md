@@ -19,7 +19,7 @@ This code includes following functions.
 
 For Ratio type :
 
-normlize()
+normalize()
 <
 <=
 >
@@ -43,12 +43,12 @@ For Matrix :
 +
 -
 matrix_transpose()
-RatioMat_to_LDMat()      // this function converts Ratio type Matrix to long double type Matrix
+RatioMat_to_LDMat()      // This function converts Ratio type Matrix to long double type Matrix
 matrix_power()
 matrix_print()
 matrix_inverse()
 matrix_determinant()
-QR_decomposition()       // if you use Ratio type Matrix, Q's col vectors are only orthogonal. Not unit vectors. But QR is still A.
+QR_decomposition()       // If you use Ratio type Matrix, Q's col vectors are only orthogonal. Not unit vectors. But QR is still A.
 LU_decomposition()
 Eigen_Approx()           // only Symmetric Matrix can be used.
 
