@@ -701,7 +701,7 @@ inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
                 break;
             }
         if(P)   continue;
-        if(b[i]!=0) {
+        if(R[i][n-1]!=0) {
             printf("Ax=b calculation Error : This System is Not Solvable\n\n");
             exit(1);
         }
@@ -713,7 +713,7 @@ inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
     
     if(R.size() == R[0].size()-1) {
         vector<T> r(R.size());
-        for(i=0; i<r.size(); ++i)   r[i]=R[n-1][i];
+        for(i=0; i<r.size(); ++i)   r[i]=R[i][n-1];
         return r;
     }
     vector<T> r(n-1,0);
@@ -736,16 +736,16 @@ inline vector<vector<T>> matrix_row_division (vector<vector<T>> A, const vector<
 int main()
 {
     vector<vector<Ratio>> A = {
-//        {1,2,3},
-//        {1,3,3},
-//        {2,4,7},
-//        {1,1,1}
+        {1,2,3},
+        {1,3,3},
+        {2,4,7},
+        {1,1,1}
         
-        {1,2,2,2},
-        {2,4,6,8},
-        {3,6,8,11}
+//        {1,2,2,2},
+//        {2,4,6,8},
+//        {3,6,8,11}
     }, L,U,Q,R;
-    vector<Ratio> b = {1,2,3};
+    vector<Ratio> b = {1,2,3,-2};
 //    QR_decomposition(A, Q, R);
 //    matrix_print(Q,0); printf("\n\n");
 //    matrix_print(matrix_transpose(Q) * Q,0); printf("\n\n");
@@ -764,7 +764,9 @@ int main()
 //            printf("%Lf\n",T[i]*T[j]);
     
     vector<Ratio> r = Ax_b(A, b);
-    vector_print(r, 0);
+    vector_print(r, 0); printf("\n\n");
+    vector<Ratio> b2 = A*r;
+    vector_print(b2, 0);
     
     
     printf("\n\n");
