@@ -563,6 +563,32 @@ inline void LU_decomposition(vector<vector<T>> A, vector<vector<T>>& L, vector<v
             U[i][j]=A[i][j];
 }
 template <typename T>
+inline vector<T> Vector_Normalize(vector<T> v) {
+    int i;
+    T s=0;
+    for(i=0; i<v.size(); ++i)   s+=v[i]*v[i];
+    for(i=0; i<v.size(); ++i)   v[i]/=s;
+    return v;
+}
+template <typename T>
+inline vector<T> Vector_Denormalize(vector<T> v) {
+    int i;
+    T min=__LDBL_MAX__;
+    vector<T> r(v.size());
+    for(i=0; i<v.size(); ++i) {
+        r[i]=round(v[i]*134217728);
+        if(abs(r[i]) < min && r[i]!=0) min = abs(r[i]);
+    }
+    for(i=0; i<r.size(); ++i)   r[i]/=min;
+    return r;
+}
+template <typename T>
+inline vector<vector<T>> clean_eigenvector(vector<vector<T>>& S) {
+    vector<vector<T>> TR = matrix_transpose(S), R(S.size(), vector<T>(S[0].size()));
+    for(int i=0; i<TR.size(); ++i)  R[i]=Vector_Denormalize(TR[i]);
+    return matrix_transpose(R);
+}
+template <typename T>
 inline void Eigen_Approx(vector<vector<T>>& A, vector<vector<T>>& e_val, vector<vector<T>>& e_vec, int n) {
     if(A.size() != A[0].size()) {
         printf("Eigen Approximation Error : Matrix is not square\n\n");
@@ -613,15 +639,23 @@ inline vector<vector<T>> matrix_row_division (vector<vector<T>> A, const vector<
 int main()
 {
     vector<vector<Ratio>> A = {
-        {3,{true,3,2}},
-        {{true,3,2},-1}
+//        {7,4,4},
+//        {4,1,-8},
+//        {4,-8,1}
+        {2,1,1},
+        {1,2,1},
+        {1,1,2}
     }, L,U,Q,R;
+    
+//    QR_decomposition(A, Q, R);
+//    matrix_print(Q,0); printf("\n\n");
+//    matrix_print(matrix_transpose(Q) * Q,0); printf("\n\n");
     
     vector<vector<long double>> eval, evec, LD_A;
     LD_A = RatioMat_to_LDMat(A);
     Eigen_Approx(LD_A, eval, evec, 10000);
     matrix_print(eval); printf("\n\n");
-    matrix_print(evec); printf("\n\n");
+    matrix_print(clean_eigenvector(evec)); printf("\n\n");
     
     matrix_print(evec * eval * matrix_transpose(evec)); printf("\n\n");
     
