@@ -53,6 +53,8 @@ LU_decomposition()
 
 Eigen_Approx()           // only Symmetric Matrix can be used.
 
+Ax=b()                   // This function finds x. if there is more than one solution, this function will return particular solution.
+
 --------------------------
 
 Vector's multiplication and Matrix_vector multiplication are also defined.
