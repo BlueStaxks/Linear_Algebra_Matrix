@@ -631,6 +631,89 @@ inline void Eigen_Approx(vector<vector<Ratio>>& A, vector<vector<Ratio>>& e_val,
     exit(1);
 }
 template <typename T>
+inline vector<vector<T>> Null_Space(vector<vector<T>> A) {
+    int m = (int)A.size(), n = (int)A[0].size();
+    vector<int> piv;
+    int i,j,k,p=0,rank=0;
+    for(i=1; i-1<n && i-1-p<m; ++i)
+    {
+        if(A[i-1-p][i-1]==0)
+        {
+            bool P=true;
+            for(j=i-p; j<m; ++j)
+                if(A[j][i-1]!=0) {
+                    vector<T> temp = A[i-1-p];
+                    A[i-1-p] = A[j];
+                    A[j] = temp;
+                    i--;
+                    P=false;
+                    break;
+                }
+            if(!P)  continue;
+            p++;
+            continue;
+        }
+        piv.push_back(i-1);
+        rank++;
+        T temp = A[i-1-p][i-1];
+        A[i-1-p][i-1]=1;
+        for(j=i; j<n; ++j)    A[i-1-p][j] = A[i-1-p][j] / temp;
+        for (j = i - p; j < m; ++j) {
+            T mul = A[j][i - 1];
+            if(mul == 0)  continue;
+            for (k = i - 1; k < n; ++k)
+                A[j][k] = A[j][k] - (A[i - 1 - p][k] * mul);
+        }
+    }
+    for(i=(int)piv.size()-1; i>0; --i) //upper elimination
+        for(j=i-1; j>=0; --j)
+        {
+            T mul = A[j][piv[i]];
+            for(k=piv[i]; k<n; ++k)
+                A[j][k] = A[j][k] - (A[i][k] * mul);
+        }
+    for(i=m-1; i>=0; --i) //zero row pop
+    {
+        bool P=false;
+        for(j=0; j<n; ++j)
+            if(A[i][j]!=0) {
+                P=true;
+                break;
+            }
+        if(P)   continue;
+        A.pop_back();
+    }
+    if(A.size() == A[0].size()) {
+        printf("Null_Space calculation Alert : There is no Special Solutions\n\n");
+        exit(1);
+    }
+    vector<vector<T>> TR = matrix_transpose(A), F(n-rank);
+    vector<pair<int,int>> exc;
+    T mo = -1;
+    for(i=0; i<rank; ++i) {
+        if(piv[i]!=i) {
+            vector<T> te = TR[i];
+            TR[i] = TR[piv[i]];
+            TR[piv[i]] = te;
+            exc.push_back({i,piv[i]});
+            piv[i]=i; //data loss
+        }
+    }
+    for(p=i; i<n; ++i) F[i-p] = mo * TR[i];
+    vector<vector<T>> N = matrix_transpose(F);
+    for(i=0; i<F.size(); ++i) {
+        vector<T> te(F.size(),0);
+        te[i]=1;
+        N.push_back(te);
+    }
+    for(i=0; i<exc.size(); ++i) {
+        vector<T> te = N[exc[i].first];
+        N[exc[i].first] = N[exc[i].second];
+        N[exc[i].second] = te;
+    }
+    return N;
+}
+template <typename T>
 inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
     if(A.size() != b.size()) {
         printf("Ax=b calculation Error : Size is different\n\n");
@@ -647,9 +730,6 @@ inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
             R[i][j]=A[i][j];
         R[i][j]=b[i];
     }
-    
-    matrix_print(R, 0); printf("\n\n");
-    
     for(i=1; i<n && i-1-p<m; ++i)
     {
         if(R[i-1-p][i-1]==0)
@@ -680,8 +760,6 @@ inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
                 R[j][k] = R[j][k] - (R[i - 1 - p][k] * mul);
         }
     }
-    matrix_print(R, 0); printf("\n\n");
-    
     for(i=(int)piv.size()-1; i>0; --i) //upper elimination
         for(j=i-1; j>=0; --j)
         {
@@ -689,9 +767,6 @@ inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
             for(k=piv[i]; k<n; ++k)
                 R[j][k] = R[j][k] - (R[i][k] * mul);
         }
-    
-    matrix_print(R, 0); printf("\n\n");
-    
     for(i=m-1; i>=0; --i) //zero row solvablity
     {
         bool P=false;
@@ -708,9 +783,6 @@ inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
         R.pop_back();
         b.pop_back();
     }
-    
-    matrix_print(R, 0); printf("\n\n");
-    
     if(R.size() == R[0].size()-1) {
         vector<T> r(R.size());
         for(i=0; i<r.size(); ++i)   r[i]=R[i][n-1];
@@ -736,16 +808,19 @@ inline vector<vector<T>> matrix_row_division (vector<vector<T>> A, const vector<
 int main()
 {
     vector<vector<Ratio>> A = {
-        {1,2,3},
-        {1,3,3},
-        {2,4,7},
-        {1,1,1}
+        {1,3,0,2,-1},
+        {0,0,1,4,-3},
+        {1,3,1,6,-4} 
+        
+//        {1,2,2,2},
+//        {2,4,6,8},
+//        {3,6,8,10}
         
 //        {1,2,2,2},
 //        {2,4,6,8},
 //        {3,6,8,11}
     }, L,U,Q,R;
-    vector<Ratio> b = {1,2,3,-2};
+    vector<Ratio> b = {1,2,30};
 //    QR_decomposition(A, Q, R);
 //    matrix_print(Q,0); printf("\n\n");
 //    matrix_print(matrix_transpose(Q) * Q,0); printf("\n\n");
@@ -763,10 +838,13 @@ int main()
 //        for(int j=i+1; j<T.size(); ++j)
 //            printf("%Lf\n",T[i]*T[j]);
     
-    vector<Ratio> r = Ax_b(A, b);
-    vector_print(r, 0); printf("\n\n");
-    vector<Ratio> b2 = A*r;
-    vector_print(b2, 0);
+//    vector<Ratio> r = Ax_b(A, b);
+//    vector_print(r, 0); printf("\n\n");
+//    vector<Ratio> b2 = A*r;
+//    vector_print(b2, 0);
+    
+    vector<vector<Ratio>> NS = Null_Space(A);
+    matrix_print(NS, 0);
     
     
     printf("\n\n");
