@@ -699,6 +699,9 @@ inline vector<vector<T>> Null_Space(vector<vector<T>> A) {
             piv[i]=i; //data loss
         }
     }
+    
+    matrix_print(TR, 0);
+    
     for(p=i; i<n; ++i) F[i-p] = mo * TR[i];
     vector<vector<T>> N = matrix_transpose(F);
     for(i=0; i<F.size(); ++i) {
@@ -706,7 +709,7 @@ inline vector<vector<T>> Null_Space(vector<vector<T>> A) {
         te[i]=1;
         N.push_back(te);
     }
-    for(i=0; i<exc.size(); ++i) {
+    for(i=(int)exc.size()-1; i>=0; --i) {
         vector<T> te = N[exc[i].first];
         N[exc[i].first] = N[exc[i].second];
         N[exc[i].second] = te;
@@ -808,17 +811,20 @@ inline vector<vector<T>> matrix_row_division (vector<vector<T>> A, const vector<
 int main()
 {
     vector<vector<Ratio>> A = {
-        {1,3,0,2,-1},
-        {0,0,1,4,-3},
-        {1,3,1,6,-4} 
+//        {1,3,0,2,-1},
+//        {0,0,1,4,-3},
+//        {1,3,1,6,-4} 
         
 //        {1,2,2,2},
 //        {2,4,6,8},
 //        {3,6,8,10}
         
-//        {1,2,2,2},
-//        {2,4,6,8},
-//        {3,6,8,11}
+        {1,2,2,2},
+        {2,4,6,8},
+        {3,6,8,11}
+        
+//        {1,1},
+//        {3,3}
     }, L,U,Q,R;
     vector<Ratio> b = {1,2,30};
 //    QR_decomposition(A, Q, R);
@@ -844,7 +850,8 @@ int main()
 //    vector_print(b2, 0);
     
     vector<vector<Ratio>> NS = Null_Space(A);
-    matrix_print(NS, 0);
+    matrix_print(NS, 0);    printf("\n\n");
+    matrix_print(A * NS, 0);
     
     
     printf("\n\n");
