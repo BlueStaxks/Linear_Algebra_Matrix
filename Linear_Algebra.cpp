@@ -332,7 +332,7 @@ inline vector<vector<long double>> RatioMat_to_LDMat(const vector<vector<Ratio>>
     vector<vector<long double>> R(A.size(), vector<long double>(A[0].size()));
     for(int i=0; i<A.size(); ++i)
         for(int j=0; j<A[i].size(); ++j) {
-            R[i][j] = A[i][j].a / A[i][j].b;
+            R[i][j] = A[i][j].a / (long double)A[i][j].b;
             if(A[i][j].sign)    R[i][j]=-R[i][j];
         }
     return R;
@@ -613,8 +613,8 @@ inline vector<vector<T>> matrix_row_division (vector<vector<T>> A, const vector<
 int main()
 {
     vector<vector<Ratio>> A = {
-        {-2,2},
-        {2,1}
+        {3,{true,3,2}},
+        {{true,3,2},-1}
     }, L,U,Q,R;
     
     vector<vector<long double>> eval, evec, LD_A;
