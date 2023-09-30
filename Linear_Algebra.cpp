@@ -567,6 +567,7 @@ inline vector<T> Vector_Normalize(vector<T> v) {
     int i;
     T s=0;
     for(i=0; i<v.size(); ++i)   s+=v[i]*v[i];
+    s = sqrt(s);
     for(i=0; i<v.size(); ++i)   v[i]/=s;
     return v;
 }
