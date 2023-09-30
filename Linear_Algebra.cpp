@@ -577,8 +577,9 @@ inline vector<T> Vector_Denormalize(vector<T> v) {
     T min=__LDBL_MAX__;
     vector<T> r(v.size());
     for(i=0; i<v.size(); ++i) {
+        if(r[i]==0) continue;
         r[i]=round(v[i]*134217728);
-        if(abs(r[i]) < min && r[i]!=0) min = abs(r[i]);
+        if(abs(r[i]) < min) min = abs(r[i]);
     }
     for(i=0; i<r.size(); ++i)   r[i]/=min;
     return r;
@@ -630,6 +631,66 @@ inline void Eigen_Approx(vector<vector<Ratio>>& A, vector<vector<Ratio>>& e_val,
     exit(1);
 }
 template <typename T>
+inline vector<T> Ax_b(vector<vector<T>>& A, vector<T>& b) {
+    if(A.size() != b.size()) {
+        printf("Ax=b calculation Error : Size is different\n\n");
+        exit(1);
+    }
+    auto m = A.size(), n = A[0].size();
+    auto el = n>m?m:n;
+    n++;
+    vector<vector<T>> R(m,vector<T>(n,0));
+    vector<int> piv;
+    int i,j,k,p=0,elimi=0;
+    for(i=0; i<m; ++i)
+    {
+        for(j=0; j<n; ++j)
+            R[i][j]=A[i][j];
+        R[i][j]=b[i];
+    }
+    for(i=1; elimi<el; ++i)
+    {
+        //matrix_print(A, 0); printf("\n\n");
+        if(A[i-1-p][i-1]==0)
+        {
+            bool P=true;
+            for(j=i-p; j<m; ++j)
+                if(A[j][i-1]!=0) {
+                    vector<T> temp = A[i-1-p];
+                    A[i-1-p] = A[j];
+                    A[j] = temp;
+                    i--;
+                    P=false;
+                    break;
+                }
+            if(!P)  continue;
+            p++;
+            continue;
+        }
+        piv.push_back(i-1);
+        elimi++;
+        T temp = A[i-1-p][i-1];
+        A[i-1-p][i-1]=1;
+        for(j=i; j<n; ++j)    A[i-1-p][j] /= temp;
+        for (j = i - p; j < m; ++j) {
+            T mul = A[j][i - 1];
+            if(mul == 0)  continue;
+            for (k = i - 1; k < n; ++k)
+                A[j][k] = A[j][k] - (A[i - 1 - p][k] * mul);
+        }
+    }
+    vector<vector<Ratio>> PR(m,vector<Ratio>(n));
+    for(i=0; i<m; ++i)
+        for(j=0; j<n; ++j)
+            //PR[i][j]=R[i][j];
+    //matrix_print(PR, 0);
+    return;
+}
+//template <>
+//inline vector<Ratio> Ax_b(vector<vector<Ratio>>& A, vector<Ratio>& b) {
+//
+//}
+template <typename T>
 inline vector<vector<T>> matrix_row_division (vector<vector<T>> A, const vector<T>& v) {
     if(A.size() != v.size())    exit(1);
     for(int i=0; i<A.size(); ++i)
@@ -643,28 +704,29 @@ int main()
 //        {7,4,4},
 //        {4,1,-8},
 //        {4,-8,1}
-        {2,1,1},
-        {1,2,1},
-        {1,1,2}
+        {1,2,2,2},
+        {2,4,6,8},
+        {3,6,8,10}
     }, L,U,Q,R;
-    
+    vector<Ratio> b(3,0);
 //    QR_decomposition(A, Q, R);
 //    matrix_print(Q,0); printf("\n\n");
 //    matrix_print(matrix_transpose(Q) * Q,0); printf("\n\n");
     
-    vector<vector<long double>> eval, evec, LD_A;
-    LD_A = RatioMat_to_LDMat(A);
-    Eigen_Approx(LD_A, eval, evec, 10000);
-    matrix_print(eval); printf("\n\n");
-    matrix_print(clean_eigenvector(evec)); printf("\n\n");
+//    vector<vector<long double>> eval, evec, LD_A;
+//    LD_A = RatioMat_to_LDMat(A);
+//    Eigen_Approx(LD_A, eval, evec, 10000);
+//    matrix_print(eval); printf("\n\n");
+//    matrix_print(clean_eigenvector(evec)); printf("\n\n");
+//    
+//    matrix_print(evec * eval * matrix_transpose(evec)); printf("\n\n");
+//    
+//    vector<vector<long double>> T = matrix_transpose(evec);
+//    for(int i=0; i<T.size() - 1; ++i)
+//        for(int j=i+1; j<T.size(); ++j)
+//            printf("%Lf\n",T[i]*T[j]);
     
-    matrix_print(evec * eval * matrix_transpose(evec)); printf("\n\n");
-    
-    vector<vector<long double>> T = matrix_transpose(evec);
-    for(int i=0; i<T.size() - 1; ++i)
-        for(int j=i+1; j<T.size(); ++j)
-            printf("%Lf\n",T[i]*T[j]);
-    
+    Ax_b(A, b);
     
     
     
