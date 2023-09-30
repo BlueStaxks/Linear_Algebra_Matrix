@@ -699,9 +699,6 @@ inline vector<vector<T>> Null_Space(vector<vector<T>> A) {
             piv[i]=i; //data loss
         }
     }
-    
-    matrix_print(TR, 0);
-    
     for(p=i; i<n; ++i) F[i-p] = mo * TR[i];
     vector<vector<T>> N = matrix_transpose(F);
     for(i=0; i<F.size(); ++i) {
@@ -819,9 +816,9 @@ int main()
 //        {2,4,6,8},
 //        {3,6,8,10}
         
-        {1,2,2,2},
-        {2,4,6,8},
-        {3,6,8,11}
+        {1,2,2,2,2,8},
+        {2,4,6,82,2,4},
+        {30,6,8,30,1,9}
         
 //        {1,1},
 //        {3,3}
