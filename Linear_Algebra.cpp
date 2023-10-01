@@ -367,6 +367,7 @@ inline void matrix_print(vector<vector<Ratio>> a, bool F) {
             a[i][j].Ratio_print(F);
         printf("\n");
     }
+    printf("\n\n");
 }
 inline void matrix_print(vector<vector<long double>> a) {
     if(a.empty())   return;   if(a[0].empty())    return;
@@ -376,11 +377,12 @@ inline void matrix_print(vector<vector<long double>> a) {
             printf("%Lf\t",a[i][j]);
         printf("\n");
     }
+    printf("\n\n");
 }
 inline void vector_print(vector<Ratio>& a, bool F) {
     for(int i=0; i<a.size(); ++i)
         a[i].Ratio_print(F);
-    printf("\n");
+    printf("\n\n\n");
 }
 template <typename T>
 inline vector<vector<T>> matrix_inverse(vector<vector<T>> a) {
@@ -818,7 +820,7 @@ int main()
         
         {1,2,2,2,2,8},
         {2,4,6,82,2,4},
-        {30,6,8,30,1,9}
+        {330,6,8,30,9991,9}
         
 //        {1,1},
 //        {3,3}
@@ -841,17 +843,16 @@ int main()
 //        for(int j=i+1; j<T.size(); ++j)
 //            printf("%Lf\n",T[i]*T[j]);
     
-//    vector<Ratio> r = Ax_b(A, b);
-//    vector_print(r, 0); printf("\n\n");
-//    vector<Ratio> b2 = A*r;
-//    vector_print(b2, 0);
+    vector<Ratio> r = Ax_b(A, b);
+    vector_print(r, 0);
+    vector<Ratio> b2 = A*r;
+    vector_print(b2, 0);
     
     vector<vector<Ratio>> NS = Null_Space(A);
-    matrix_print(NS, 0);    printf("\n\n");
+    matrix_print(NS, 0);
     matrix_print(A * NS, 0);
     
     
-    printf("\n\n");
 
     return 0;
 }
