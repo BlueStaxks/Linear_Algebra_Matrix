@@ -877,10 +877,10 @@ int main()
 //        {2,4,6,82,2,4},
 //        {330,6,8,30,9991,9}
         
-        {1,2,2,2},
-        {2,4,6,8},
-        {3,6,6,10},
-        {2,5,5,5}
+        {1,1,1,1},
+        {1,1,1,1},
+        {1,1,1,1},
+        {1,1,1,1}
         
 //        {1,1},
 //        {3,3}
@@ -912,8 +912,10 @@ int main()
 //    matrix_print(NS, 0);
 //    matrix_print(A * NS, 0);
     
-    matrix_determinant(A).Ratio_print(0);
+    vector<vector<Ratio>> A2 = matrix_full_row_rank(A);
+    vector<vector<Ratio>> A3 = matrix_full_row_rank(matrix_transpose(A2));
     
+    matrix_print(A3, 0);
     
 
     return 0;
