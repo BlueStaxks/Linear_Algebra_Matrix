@@ -51,7 +51,7 @@ QR_decomposition()       // If you use Ratio type Matrix, Q's col vectors are on
 
 LU_decomposition()
 
-Eigen_Approx()           // only Symmetric Matrix can be used(Not Singular). If this approach is possible, It's very accurate.
+Eigen_Approx()           // only Symmetric Matrix can be used(Not Singular).
 
 Null_Space()
 
