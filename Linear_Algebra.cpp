@@ -680,7 +680,7 @@ inline vector<vector<T>> Null_Space(vector<vector<T>> A) {
                 P=true;
                 break;
             }
-        if(P)   continue;
+        if(P)   break;
         A.pop_back();
     }
     if(A.size() == A[0].size()) {
@@ -775,7 +775,7 @@ inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
                 P=true;
                 break;
             }
-        if(P)   continue;
+        if(P)   break;
         if(R[i][n-1]!=0) {
             printf("Ax=b calculation Error : This System is Not Solvable\n\n");
             exit(1);
