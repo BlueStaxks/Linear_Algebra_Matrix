@@ -576,7 +576,7 @@ inline vector<T> Vector_Normalize(vector<T> v) {
 template <typename T>
 inline vector<T> Vector_Denormalize(vector<T> v) {
     int i;
-    T min=__LDBL_MAX__;
+    T min= 999999999;
     vector<T> r(v.size());
     for(i=0; i<v.size(); ++i) {
         if(r[i]==0) continue;
@@ -800,6 +800,61 @@ inline vector<T> Ax_b(vector<vector<T>>& A, vector<T> b) {
     return r;
 }
 template <typename T>
+inline vector<vector<T>> matrix_full_row_rank(vector<vector<T>> A) {
+    auto m = A.size(), n = A[0].size();
+    vector<vector<T>> A2 = A;
+    vector<int> exc(m);
+    vector<bool> Ap(m,false);
+    int i,j,k,p=0;
+    for(i=0; i<m; ++i)  exc[i]=i;
+    for(i=1; i-1<n && i-1-p<m; ++i)
+    {
+        if(A[i-1-p][i-1]==0)
+        {
+            bool P=true;
+            for(j=i-p; j<m; ++j)
+                if(A[j][i-1]!=0) {
+                    exc[i-1-p] ^= exc[j] ^= exc[i-1-p] ^= exc[j];
+                    vector<T> temp = A[i-1-p];
+                    A[i-1-p] = A[j];
+                    A[j] = temp;
+                    i--;
+                    P=false;
+                    break;
+                }
+            if(!P)  continue;
+            p++;
+            continue;
+        }
+        T temp = A[i-1-p][i-1];
+        A[i-1-p][i-1]=1;
+        for(j=i; j<n; ++j)    A[i-1-p][j] = A[i-1-p][j] / temp;
+        for (j = i - p; j < m; ++j) {
+            T mul = A[j][i - 1];
+            if(mul == 0)  continue;
+            for (k = i - 1; k < n; ++k)
+                A[j][k] = A[j][k] - (A[i - 1 - p][k] * mul);
+        }
+    }
+    for(i=m-1; i>=0; --i) //zero row pop
+    {
+        bool P=false;
+        for(j=0; j<n; ++j)
+            if(A[i][j]!=0) {
+                P=true;
+                break;
+            }
+        if(P)   break;
+        //A.pop_back();
+        Ap[exc[i]]=true;
+    }
+    vector<vector<T>> FRA;
+    for(i=0; i<m; ++i)
+        if(!Ap[i])
+            FRA.push_back(A2[i]);
+    return FRA;
+}
+template <typename T>
 inline vector<vector<T>> matrix_row_division (vector<vector<T>> A, const vector<T>& v) {
     if(A.size() != v.size())    exit(1);
     for(int i=0; i<A.size(); ++i)
@@ -818,9 +873,14 @@ int main()
 //        {2,4,6,8},
 //        {3,6,8,10}
         
-        {1,2,2,2,2,8},
-        {2,4,6,82,2,4},
-        {330,6,8,30,9991,9}
+//        {1,2,2,2,2,8},
+//        {2,4,6,82,2,4},
+//        {330,6,8,30,9991,9}
+        
+        {1,2,2,2},
+        {2,4,6,8},
+        {3,6,6,10},
+        {2,5,5,5}
         
 //        {1,1},
 //        {3,3}
@@ -833,24 +893,26 @@ int main()
 //    vector<vector<long double>> eval, evec, LD_A;
 //    LD_A = RatioMat_to_LDMat(A);
 //    Eigen_Approx(LD_A, eval, evec, 10000);
-//    matrix_print(eval); printf("\n\n");
-//    matrix_print(clean_eigenvector(evec)); printf("\n\n");
+//    matrix_print(eval);
+//    matrix_print(evec);
 //
-//    matrix_print(evec * eval * matrix_transpose(evec)); printf("\n\n");
+//    matrix_print(evec * eval * matrix_transpose(evec));
 //
 //    vector<vector<long double>> T = matrix_transpose(evec);
 //    for(int i=0; i<T.size() - 1; ++i)
 //        for(int j=i+1; j<T.size(); ++j)
 //            printf("%Lf\n",T[i]*T[j]);
     
-    vector<Ratio> r = Ax_b(A, b);
-    vector_print(r, 0);
-    vector<Ratio> b2 = A*r;
-    vector_print(b2, 0);
+//    vector<Ratio> r = Ax_b(A, b);
+//    vector_print(r, 0);
+//    vector<Ratio> b2 = A*r;
+//    vector_print(b2, 0);
+//    
+//    vector<vector<Ratio>> NS = Null_Space(A);
+//    matrix_print(NS, 0);
+//    matrix_print(A * NS, 0);
     
-    vector<vector<Ratio>> NS = Null_Space(A);
-    matrix_print(NS, 0);
-    matrix_print(A * NS, 0);
+    matrix_determinant(A).Ratio_print(0);
     
     
 
