@@ -57,6 +57,8 @@ Null_Space()
 
 Ax=b()                   // This function finds x. if there is more than one solution, this function will return particular solution.
 
+matrix_full_row_rank()   // Makes m by n matrix to r by n matrix. (Do it and do it with transpose matrix, then it will become r by r invertible matrix or scalar)
+
 --------------------------
 
 Vector's multiplication and Matrix_vector multiplication are also defined.
