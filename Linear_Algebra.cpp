@@ -350,6 +350,14 @@ inline vector<vector<T>> matrix_power(vector<vector<T>> a, unsigned long long n)
     return res;
 }
 template <typename T>
+inline vector<vector<T>> matrix_row_multiply(vector<vector<T>> A, const vector<T>& v) {
+    if(A.size() != v.size())    exit(1);
+    for(int i=0; i<A.size(); ++i)
+        for(int j=0; j<A[i].size(); ++j)
+            A[i][j] = A[i][j] * v[i];
+    return A;
+}
+template <typename T>
 inline T Ratio_power(T a, unsigned long long n) {
     T res = 1;
     while (n) {
@@ -382,6 +390,11 @@ inline void matrix_print(vector<vector<long double>> a) {
 inline void vector_print(vector<Ratio>& a, bool F) {
     for(int i=0; i<a.size(); ++i)
         a[i].Ratio_print(F);
+    printf("\n\n\n");
+}
+inline void vector_print(vector<long double>& a) {
+    for(int i=0; i<a.size(); ++i)
+        printf("%Lf\t",a[i]);
     printf("\n\n\n");
 }
 template <typename T>
@@ -474,19 +487,23 @@ inline T matrix_determinant(vector<vector<T>> a) {
 }
 template <typename T>
 inline void QR_decomposition(vector<vector<T>>& A, vector<vector<T>>& Q, vector<vector<T>>& R) {
-    int i,j;
-    vector<vector<T>> X = matrix_transpose(A);// A[0].size(), vector<long double>(A.size()));// matrix_transpose(A);
+    R.resize(A[0].size(), vector<T>(A[0].size(),0));    R[0][0]=1;
+    vector<vector<T>> X = matrix_transpose(A);
     vector<vector<T>> V = X;
     vector<T> DP(2,0);
-    DP[1] = V[0] * V[0];
+    vector<T> N(A[0].size());
+    int i,j;
+    DP[1] = V[0]*V[0];
     for(i=1; i<A[0].size(); ++i)
     {
         for(j=1; j<=i; ++j)
         {
             T c = (V[j-1]*X[i])/DP[j];
+            R[j-1][i] = c;
             V[i] = V[i] - (c*V[j-1]);
         }
         DP.push_back(V[i]*V[i]);
+        R[j-1][i] = (X[i]*V[i])/DP.back();
         if(DP.back()==0) {
             printf("QR decomposition Error : Matrix is singular\n\n");
             exit(1);
@@ -498,12 +515,10 @@ inline void QR_decomposition(vector<vector<T>>& A, vector<vector<T>>& Q, vector<
         for(j=0; j<V[0].size(); ++j)    r += V[i][j] * V[i][j];
         r = sqrt(r);
         for(j=0; j<V[0].size(); ++j)    V[i][j] /= r;
+        N[i]=r;
     }
     Q = matrix_transpose(V);
-    R = V*A;
-    for(i=1; i<R.size(); ++i)
-        for(j=0; j<i; ++j)
-            R[i][j]=0;
+    R = matrix_row_multiply(R, N);
 }
 template <>
 inline void QR_decomposition(vector<vector<Ratio>>& A, vector<vector<Ratio>>& Q, vector<vector<Ratio>>& R) {
@@ -576,10 +591,10 @@ inline vector<T> Vector_Normalize(vector<T> v) {
 template <typename T>
 inline vector<T> Vector_Denormalize(vector<T> v) {
     int i;
-    T min= 999999999;
-    vector<T> r(v.size());
+    T min = __LDBL_MAX__;
+    vector<T> r(v.size(),0);
     for(i=0; i<v.size(); ++i) {
-        if(r[i]==0) continue;
+        if(v[i]==0) continue;
         r[i]=round(v[i]*134217728);
         if(abs(r[i]) < min) min = abs(r[i]);
     }
@@ -854,14 +869,6 @@ inline vector<vector<T>> matrix_full_row_rank(vector<vector<T>> A) {
             FRA.push_back(A2[i]);
     return FRA;
 }
-template <typename T>
-inline vector<vector<T>> matrix_row_division (vector<vector<T>> A, const vector<T>& v) {
-    if(A.size() != v.size())    exit(1);
-    for(int i=0; i<A.size(); ++i)
-        for(int j=0; j<A[i].size(); ++j)
-            A[i][j] = A[i][j]/v[i];
-    return A;
-}
 int main()
 {
     vector<vector<Ratio>> A = {
@@ -877,31 +884,37 @@ int main()
 //        {2,4,6,82,2,4},
 //        {330,6,8,30,9991,9}
         
-        {1,1,1,1},
-        {1,1,1,1},
-        {1,1,1,1},
-        {1,1,1,1}
+        {1,2,3},
+        {2,5,9},
+        {3,9,88}
+        
         
 //        {1,1},
 //        {3,3}
     }, L,U,Q,R;
-    vector<Ratio> b = {1,2,30};
+//    vector<Ratio> b = {1,2,30};
 //    QR_decomposition(A, Q, R);
-//    matrix_print(Q,0); printf("\n\n");
-//    matrix_print(matrix_transpose(Q) * Q,0); printf("\n\n");
+//    matrix_print(Q,0);
+//    matrix_print(matrix_transpose(Q) * Q,0);
     
-//    vector<vector<long double>> eval, evec, LD_A;
-//    LD_A = RatioMat_to_LDMat(A);
-//    Eigen_Approx(LD_A, eval, evec, 10000);
-//    matrix_print(eval);
-//    matrix_print(evec);
-//
-//    matrix_print(evec * eval * matrix_transpose(evec));
-//
-//    vector<vector<long double>> T = matrix_transpose(evec);
-//    for(int i=0; i<T.size() - 1; ++i)
-//        for(int j=i+1; j<T.size(); ++j)
-//            printf("%Lf\n",T[i]*T[j]);
+    vector<vector<long double>> eval, evec, LD_A;
+    LD_A = RatioMat_to_LDMat(A);
+    Eigen_Approx(LD_A, eval, evec, 10000);
+    matrix_print(eval);
+    
+    vector<vector<long double>> vec2 = matrix_transpose(evec);
+    for(int i=0; i<vec2.size(); ++i) {
+        vector<long double> vt = Vector_Denormalize(vec2[i]);
+        vector_print(vt);
+    }
+    //matrix_print(evec);
+
+    matrix_print(evec * eval * matrix_transpose(evec));
+
+    vector<vector<long double>> T = matrix_transpose(evec);
+    for(int i=0; i<T.size() - 1; ++i)
+        for(int j=i+1; j<T.size(); ++j)
+            printf("%Lf\n",T[i]*T[j]);
     
 //    vector<Ratio> r = Ax_b(A, b);
 //    vector_print(r, 0);
@@ -912,10 +925,9 @@ int main()
 //    matrix_print(NS, 0);
 //    matrix_print(A * NS, 0);
     
-    vector<vector<Ratio>> A2 = matrix_full_row_rank(A);
-    vector<vector<Ratio>> A3 = matrix_full_row_rank(matrix_transpose(A2));
-    
-    matrix_print(A3, 0);
+//    vector<vector<Ratio>> A2 = matrix_full_row_rank(A);
+//    vector<vector<Ratio>> A3 = matrix_full_row_rank(matrix_transpose(A2));
+//    matrix_print(A3, 0);
     
 
     return 0;
