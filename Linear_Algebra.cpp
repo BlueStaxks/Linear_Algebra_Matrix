@@ -320,6 +320,28 @@ inline vector<T> operator - (const vector<T> &a, const vector<T> &b) {
     return R;
 }
 template <typename T>
+inline vector<T> Vector_Normalize(vector<T> v) {
+    int i;
+    T s=0;
+    for(i=0; i<v.size(); ++i)   s+=v[i]*v[i];
+    s = sqrt(s);
+    for(i=0; i<v.size(); ++i)   v[i]/=s;
+    return v;
+}
+template <typename T>
+inline vector<T> Vector_Denormalize(vector<T> v) {
+    int i;
+    T min = __LDBL_MAX__;
+    vector<T> r(v.size(),0);
+    for(i=0; i<v.size(); ++i) {
+        if(v[i]==0) continue;
+        r[i]=round(v[i]*134217728);
+        if(abs(r[i]) < min) min = abs(r[i]);
+    }
+    for(i=0; i<r.size(); ++i)   r[i]/=min;
+    return r;
+}
+template <typename T>
 inline vector<vector<T>> matrix_transpose(const vector<vector<T>> &a) {
     vector<vector<T>> R(a.front().size(), vector<T>(a.size()));
     int i, j;
@@ -578,28 +600,6 @@ inline void LU_decomposition(vector<vector<T>> A, vector<vector<T>>& L, vector<v
     for(i=0; i<m; ++i)
         for(j=0; j<n; ++j)
             U[i][j]=A[i][j];
-}
-template <typename T>
-inline vector<T> Vector_Normalize(vector<T> v) {
-    int i;
-    T s=0;
-    for(i=0; i<v.size(); ++i)   s+=v[i]*v[i];
-    s = sqrt(s);
-    for(i=0; i<v.size(); ++i)   v[i]/=s;
-    return v;
-}
-template <typename T>
-inline vector<T> Vector_Denormalize(vector<T> v) {
-    int i;
-    T min = __LDBL_MAX__;
-    vector<T> r(v.size(),0);
-    for(i=0; i<v.size(); ++i) {
-        if(v[i]==0) continue;
-        r[i]=round(v[i]*134217728);
-        if(abs(r[i]) < min) min = abs(r[i]);
-    }
-    for(i=0; i<r.size(); ++i)   r[i]/=min;
-    return r;
 }
 template <typename T>
 inline vector<vector<T>> clean_eigenvector(vector<vector<T>>& S) {
@@ -903,11 +903,11 @@ int main()
     matrix_print(eval);
     
     vector<vector<long double>> vec2 = matrix_transpose(evec);
-    for(int i=0; i<vec2.size(); ++i) {
-        vector<long double> vt = Vector_Denormalize(vec2[i]);
-        vector_print(vt);
-    }
-    //matrix_print(evec);
+//    for(int i=0; i<vec2.size(); ++i) {
+//        vector<long double> vt = Vector_Denormalize(vec2[i]);
+//        vector_print(vt);
+//    }
+    matrix_print(evec);
 
     matrix_print(evec * eval * matrix_transpose(evec));
 
