@@ -491,7 +491,7 @@ inline T matrix_determinant(vector<vector<T>> a) {
                 if(a[j][i-1]!=0)
                 {
                     vector<T> t=a[j];   a[j]=a[i-1];    a[i-1]=t;
-                    r.sign = !r.sign;
+                    r = r*(-1);
                     P=false;
                     break;
                 }
