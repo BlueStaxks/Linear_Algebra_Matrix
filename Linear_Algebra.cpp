@@ -480,7 +480,7 @@ inline T matrix_determinant(vector<vector<T>> a) {
         printf("Matrix determinant Error : Matrix is not square\n\n");
         exit(1);
     }
-    T r=1;
+    int tr = 1;
     auto n = a.size();
     long long i, j, k;
     for (i = 1; i < n; ++i) {
@@ -491,7 +491,7 @@ inline T matrix_determinant(vector<vector<T>> a) {
                 if(a[j][i-1]!=0)
                 {
                     vector<T> t=a[j];   a[j]=a[i-1];    a[i-1]=t;
-                    r = r*(-1);
+                    tr*=-1;
                     P=false;
                     break;
                 }
@@ -504,6 +504,7 @@ inline T matrix_determinant(vector<vector<T>> a) {
                 a[j][k] = a[j][k] - (a[i - 1][k] * mul);
         }
     }
+    T r = tr;
     for(i=0; i<n; ++i)  r = r * a[i][i];
     return r;
 }
