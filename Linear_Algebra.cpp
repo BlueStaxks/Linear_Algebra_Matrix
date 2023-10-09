@@ -29,6 +29,10 @@ typedef struct Ratio {
         b=1;
     }
     Ratio(long long k1, long long k2) {
+        if(!k2) {
+            printf("denominator is zero.\n\n");
+            exit(1);
+        }
         if(k1<0 && k2<0) {
             sign=false;
             a=-k1;  b=-k2;
@@ -47,6 +51,10 @@ typedef struct Ratio {
         }
     }
     Ratio(bool S, unsigned long long k1, unsigned long long k2) {
+        if(!k2) {
+            printf("denominator is zero.\n\n");
+            exit(1);
+        }
         sign=S; a=k1;   b=k2;
     }
     inline void normalize()
