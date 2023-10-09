@@ -179,7 +179,6 @@ inline Ratio operator - (Ratio A, Ratio B) {
 } // -------------------------------------------------------------------------- Ratio define
 template <typename T>
 inline bool operator == (vector<vector<T>> &a, vector<vector<T>> &b) {
-    printf("ddd");
     if (a.front().size() != b.front().size() || a.size() != b.size())  return false;
     for(int i=0; i<a.size(); ++i)
         for(int j=0; j<a[0].size(); ++j)
