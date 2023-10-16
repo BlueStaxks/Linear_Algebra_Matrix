@@ -879,7 +879,7 @@ inline vector<vector<T>> matrix_full_row_rank(vector<vector<T>> A) {
     return FRA;
 }
 template <typename T>
-inline vector<vector<T>> change_of_basis_P(vector<vector<T>> B, vector<vector<T>> C) {
+inline vector<vector<T>> change_of_basis_P(vector<vector<T>> B, vector<vector<T>> C) { //B to C
     if(matrix_determinant(B)==0 || matrix_determinant(C)==0) {
         printf("Change of Basis P Error : Vectors are dependent.\n\n\n");
         exit(1);
@@ -951,12 +951,14 @@ int main()
 //    matrix_print(A3, 0);
     
     vector<vector<Ratio>> B = {
-        {-1,2},
-        {2,-1}
+        {1,1,-1},
+        {0,1,0},
+        {0,0,1}
     };
     vector<vector<Ratio>> C = {
-        {1,1},
-        {0,1}
+        {2,-1,1},
+        {-1,3,0},
+        {1,1,0}
     };
     vector<vector<Ratio>> R1 = change_of_basis_P(B, C);
     vector<vector<Ratio>> R2 = change_of_basis_P(C, B);
