@@ -59,7 +59,7 @@ Ax=b()                   // This function finds x. if there is more than one sol
 
 matrix_full_row_rank()   // Makes m by n matrix to r by n matrix. (Do it and do it with transpose matrix, then it will become r by r invertible matrix or scalar)
 
-change_of_basis_P()      // This function uses 2 basis and make change-of-basis matrix P.
+change_of_basis_P()      // This function uses 2 basis and make change-of-basis (B to C) matrix P.
 
 --------------------------
 
