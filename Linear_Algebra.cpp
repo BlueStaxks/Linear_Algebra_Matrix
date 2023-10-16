@@ -99,8 +99,7 @@ typedef struct Ratio {
     inline bool operator != (const Ratio &K) {
         return a!=K.a || b!=K.b || sign!=K.sign;
     }
-    inline void Ratio_print(bool F)
-    {
+    inline void Ratio_print(bool F) {
         if(sign)    printf("-");
         if(F)   printf("%Lf\t",(long double)a/(long double)b);
         else    printf("%llu / %llu\t\t",a,b);
@@ -134,6 +133,8 @@ inline Ratio operator / (Ratio A, Ratio B) {
     return A*B;
 }
 inline Ratio operator + (Ratio A, Ratio B) {
+    if(!A.a)    return B;
+    if(!B.a)    return A;
     unsigned long long d = gcd(A.b,B.b);
     unsigned long long t = A.b*B.b/d;
     unsigned long long c1 = B.b/d, c2 = A.b/d;
@@ -427,23 +428,23 @@ inline void vector_print(vector<long double>& a) {
     printf("\n\n\n");
 }
 template <typename T>
-inline vector<vector<T>> matrix_inverse(vector<vector<T>> a) {
-    if (a.size() != a.front().size()) {
+inline vector<vector<T>> matrix_inverse(vector<vector<T>> A) {
+    if (A.size() != A.front().size()) {
         printf("Matrix Inversion Error : Matrix is not square\n\n");
         exit(1);
     }
-    auto n = a.size();
+    auto n = A.size();
     long long i, j, k;
     vector<vector<T>> I(n, vector<T>(n, 0));
     for (i = 0; i < n; ++i)  I[i][i] = 1;
     for (i = 1; i < n; ++i) {
-        if (a[i - 1][i - 1]==0)
+        if (A[i - 1][i - 1]==0)
         {
             bool P=true;
             for(j=i; j<n; ++j)
-                if(a[j][i-1]!=0)
+                if(A[j][i-1]!=0)
                 {
-                    vector<T> t=a[j];   a[j]=a[i-1];    a[i-1]=t;
+                    vector<T> t=A[j];   A[j]=A[i-1];    A[i-1]=t;
                     t=I[j]; I[j]=I[i-1];    I[i-1]=t;
                     P=false;
                     break;
@@ -454,31 +455,31 @@ inline vector<vector<T>> matrix_inverse(vector<vector<T>> a) {
             }
         }
         for (j = i; j < n; ++j) {
-            T mul = a[j][i - 1] / a[i - 1][i - 1];
+            T mul = A[j][i - 1] / A[i - 1][i - 1];
             for (k = 0; k < n; ++k)
             {
-                a[j][k] = a[j][k] - (a[i - 1][k] * mul);
+                A[j][k] = A[j][k] - (A[i - 1][k] * mul);
                 I[j][k] = I[j][k] - (I[i - 1][k] * mul);
             }
         }
     }
     for (i = n - 2; i >= 0; --i) {
-        if (a[i + 1][i + 1]==0) {
+        if (A[i + 1][i + 1]==0) {
             printf("Matrix Inversion Error : Matrix is singlular\n\n");
             exit(1);
         }
         for (j = i; j >= 0; --j) {
-            T mul = a[j][i + 1] / a[i + 1][i + 1];
+            T mul = A[j][i + 1] / A[i + 1][i + 1];
             for (k = 0; k < n; ++k)
             {
-                a[j][k] = a[j][k] - (a[i + 1][k] * mul);
+                A[j][k] = A[j][k] - (A[i + 1][k] * mul);
                 I[j][k] = I[j][k] - (I[i + 1][k] * mul);
             }
         }
     }
     for (i = 0; i < n; ++i)
         for (j = 0; j < n; ++j)
-            I[i][j] = I[i][j] / a[i][i];
+            I[i][j] = I[i][j] / A[i][i];
     return I;
 }
 template <typename T>
@@ -877,6 +878,18 @@ inline vector<vector<T>> matrix_full_row_rank(vector<vector<T>> A) {
             FRA.push_back(A2[i]);
     return FRA;
 }
+template <typename T>
+inline vector<vector<T>> change_of_basis_P(vector<vector<T>> B, vector<vector<T>> C) {
+    if(matrix_determinant(B)==0 || matrix_determinant(C)==0) {
+        printf("Change of Basis P Error : Vectors are dependent.\n\n\n");
+        exit(1);
+    }
+    auto n = B.size();
+    vector<vector<T>> R, INV = matrix_inverse(C), BT = matrix_transpose(B);
+    for(int i=0; i<n; ++i)
+        R.push_back(INV * BT[i]);
+    return matrix_transpose(R);
+}
 int main()
 {
     vector<vector<Ratio>> A = {
@@ -905,24 +918,24 @@ int main()
 //    matrix_print(Q,0);
 //    matrix_print(matrix_transpose(Q) * Q,0);
     
-    vector<vector<long double>> eval, evec, LD_A;
-    LD_A = RatioMat_to_LDMat(A);
-    Eigen_Approx(LD_A, eval, evec, 10000);
-    matrix_print(eval);
-    
-    vector<vector<long double>> vec2 = matrix_transpose(evec);
-//    for(int i=0; i<vec2.size(); ++i) {
-//        vector<long double> vt = Vector_Denormalize(vec2[i]);
-//        vector_print(vt);
-//    }
-    matrix_print(evec);
-
-    matrix_print(evec * eval * matrix_transpose(evec));
-
-    vector<vector<long double>> T = matrix_transpose(evec);
-    for(int i=0; i<T.size() - 1; ++i)
-        for(int j=i+1; j<T.size(); ++j)
-            printf("%Lf\n",T[i]*T[j]);
+//    vector<vector<long double>> eval, evec, LD_A;
+//    LD_A = RatioMat_to_LDMat(A);
+//    Eigen_Approx(LD_A, eval, evec, 10000);
+//    matrix_print(eval);
+//    
+//    vector<vector<long double>> vec2 = matrix_transpose(evec);
+////    for(int i=0; i<vec2.size(); ++i) {
+////        vector<long double> vt = Vector_Denormalize(vec2[i]);
+////        vector_print(vt);
+////    }
+//    matrix_print(evec);
+//
+//    matrix_print(evec * eval * matrix_transpose(evec));
+//
+//    vector<vector<long double>> T = matrix_transpose(evec);
+//    for(int i=0; i<T.size() - 1; ++i)
+//        for(int j=i+1; j<T.size(); ++j)
+//            printf("%Lf\n",T[i]*T[j]);
     
 //    vector<Ratio> r = Ax_b(A, b);
 //    vector_print(r, 0);
@@ -937,6 +950,20 @@ int main()
 //    vector<vector<Ratio>> A3 = matrix_full_row_rank(matrix_transpose(A2));
 //    matrix_print(A3, 0);
     
+    vector<vector<Ratio>> B = {
+        {-1,2},
+        {2,-1}
+    };
+    vector<vector<Ratio>> C = {
+        {1,1},
+        {0,1}
+    };
+    vector<vector<Ratio>> R1 = change_of_basis_P(B, C);
+    vector<vector<Ratio>> R2 = change_of_basis_P(C, B);
+    vector<vector<Ratio>> R3 = R1 * R2;
+    matrix_print(R1, 0);
+    matrix_print(R2, 0);
+    matrix_print(R3, 0);
 
     return 0;
 }
