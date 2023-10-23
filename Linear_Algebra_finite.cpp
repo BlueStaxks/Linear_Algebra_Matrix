@@ -1,7 +1,7 @@
 #include <vector>
 #include <iostream>
 using namespace std;
-long long MOD = 10e9; //should be smaller sqrt(LLONG_MAX) for overflow
+long long MOD = 10e9; //must be smaller sqrt(LLONG_MAX) for overflow. It's GF so MOD should be a prime.
 
 template <typename T>
 inline bool operator == (vector<vector<T>> &a, vector<vector<T>> &b) {
