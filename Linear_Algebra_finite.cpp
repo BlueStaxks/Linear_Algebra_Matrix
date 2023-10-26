@@ -26,6 +26,16 @@ inline long long inverse(long long a) {
     int_inverse[a]=(int)t1;
     return t1;
 }
+inline long long power(long long a, long long n) {
+    long long y = 1;
+    while (n > 0) {
+        if (n & 1)
+            y = (a * y) % MOD;
+        a = (a * a) % MOD;
+        n>>= 1;
+    }
+    return y;
+}
 
 template <typename T>
 inline bool operator == (vector<vector<T>> &a, vector<vector<T>> &b) {
@@ -375,7 +385,7 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
     }
     for(p=i; i<n; ++i) 
         for(j=0; j<rank; ++j)
-            F[i-p][j] = MOD - TR[i][j]; //remaining col of A is not from I
+            F[i-p][j] = TR[i][j] ? MOD - TR[i][j] : 0; //remaining col of A is not from I
     vector<vector<long long>> N = matrix_transpose(F);
     for(i=0; i<F.size(); ++i) {
         vector<long long> te(F.size(),0);
@@ -394,11 +404,11 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
         printf("Matrix determinant Error : Matrix is not square\n\n");
         exit(1);
     }
-    int i,j,k,l,n=(int)A.size(), vc=0,c=0,cp=1;
+    int i,j,k,l,n=(int)A.size(), vc=0,c=0,cp=1, dMOD = (int)MOD/100;
     S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
     vector<vector<long long>> ZN;
     for(i=0; i<MOD; ++i,++c) { //eigenvalue zero to MOD-1
-        if(c==10000000) {
+        if(c==dMOD) {
             printf(" -- %d%%.\n",cp++);
             c=0;
         }
@@ -414,20 +424,32 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
                     S[k][l+vc]=ZN[k][l];
                 }
             vc+=(int)ZN[0].size();
+            printf(" -- %d eigenvalue found.\n",vc);
         }
         for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus one
     }
+    printf("\n\n");
 }
 
 int main()
 {
-    MOD = 1000000007;
+    MOD = 17;
     Initiation();
     vector<vector<long long>> A = {
-        {3,5,7,2},
-        {1,4,7,2},
-        {6,3,9,17},
-        {13,5,4,16}
+//        {3,5,7,2},
+//        {1,4,7,2},
+//        {6,3,9,17},
+//        {13,5,4,16}
+        
+//        {1,2,3,4},
+//        {2,3,4,5},
+//        {3,4,5,6},
+//        {4,5,6,7}
+        
+        {1,0,0,1},
+        {0,2,0,0},
+        {0,0,3,0},
+        {1,1,0,4}
         
 //        {1,1,1,1},
 //        {2,2,2,2},
@@ -440,12 +462,17 @@ int main()
 //    matrix_print(A * NS);
     
     matrix_diagonalize(A, S, D);
-    matrix_print(S);
-    matrix_print(D);
-    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
-    matrix_print(A2);
+//    matrix_print(S);
+//    matrix_print(D);
+//    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
+//    matrix_print(A2);
     
-    
+    long long po = 10098909798;
+    for(int i=0; i<4; ++i)  D[i][i] = power(D[i][i],po);
+    matrix_print(matrix_power(A, po));
+    matrix_print(S * D * matrix_inverse(S));
+    if(matrix_power(A, po) == S * D * matrix_inverse(S))
+        printf("GOOD\n\n");
     
     return 0;
 }
