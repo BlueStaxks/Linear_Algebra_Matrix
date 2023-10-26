@@ -36,6 +36,16 @@ inline long long power(long long a, long long n) {
     }
     return y;
 }
+inline long long gcd(long long a, long long b) {
+    if(a<b) a^=b^=a^=b;
+    long long n;
+    while(b) {
+        n = a % b;
+        a = b;
+        b = n;
+    }
+    return a;
+}
 
 template <typename T>
 inline bool operator == (vector<vector<T>> &a, vector<vector<T>> &b) {
@@ -169,25 +179,6 @@ inline vector<long long> operator - (const vector<long long> &a, const vector<lo
     for (int i = 0; i < a.size(); ++i)
         R[i] = (a[i] - b[i]) % MOD;
     return R;
-}
-inline long long Ratio_power(long long a, unsigned long long n) {
-    long long res = 1;
-    while (n) {
-        if (n & 1)  res = (res * a) % MOD;
-        n >>= 1;
-        a = (a * a) % MOD;
-    }
-    return res;
-}
-inline long long gcd(long long a, long long b) {
-    if(a<b) a^=b^=a^=b;
-    long long n;
-    while(b) {
-        n = a % b;
-        a = b;
-        b = n;
-    }
-    return a;
 }
 inline vector<long long> Extended_Euclid(long long a, long long b) {
     long long q,r1=a,r2=b,r=1,s1=1,s2=0,s,t1=0,t2=1,t;
@@ -467,7 +458,7 @@ int main()
 //    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
 //    matrix_print(A2);
     
-    long long po = 10098909798;
+    long long po = 1000001;
     for(int i=0; i<4; ++i)  D[i][i] = power(D[i][i],po);
     matrix_print(matrix_power(A, po));
     matrix_print(S * D * matrix_inverse(S));
