@@ -306,18 +306,20 @@ inline long long matrix_determinant(vector<vector<long long>> a) {
 inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
     int m = (int)A.size(), n = (int)A[0].size();
     vector<int> piv;
-    int i,j,k,p=0,rank=0;
+    int i,j,k,l,p=0,rank=0;
     for(i=1; i-1<n && i-1-p<m; ++i)
     {
-        if(A[i-1-p][i-1]==0)
+        if(A[i-1-p][i-1]==0) //pivot is zero
         {
             bool P=true;
-            for(j=i-p; j<m; ++j)
+            for(j=i-p; j<m; ++j) //row exchange is allowed
                 if(A[j][i-1]!=0) {
-                    vector<long long> temp = A[i-1-p];
-                    A[i-1-p] = A[j];
-                    A[j] = temp;
-                    i--;
+                    for(l=0; l<n; ++l)
+                        A[i-1-p][l] ^= A[j][l] ^= A[i-1-p][l] ^= A[j][l]; //row exchange
+//                    vector<long long> temp = A[i-1-p];
+//                    A[i-1-p] = A[j];
+//                    A[j] = temp;
+                    i--; //row exchanged. do it again
                     P=false;
                     break;
                 }
@@ -325,7 +327,7 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
             p++;
             continue;
         }
-        piv.push_back(i-1);
+        piv.push_back(i-1); //pivot location tracker
         rank++;
         long long temp = A[i-1-p][i-1];
         A[i-1-p][i-1]=1;
@@ -398,24 +400,31 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
     int i,j,k,l,n=(int)A.size(), vc=0,c=0,cp=1, dMOD = (int)MOD/100;
     S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
     vector<vector<long long>> ZN;
+    long long det = matrix_determinant(A);
     for(i=0; i<MOD; ++i,++c) { //eigenvalue zero to MOD-1
         if(c==dMOD) {
             printf(" -- %d%%.\n",cp++);
             c=0;
         }
         ZN = Null_Space(A);
-        if(!ZN.empty()) { // det(A - eigenvalue*I) == 0
+        if(!ZN.empty()) { // det(A - eigenvalue*I) == 0    <-- eigenvalue found
             for(k=0; k<ZN[0].size(); ++k)   D[k+vc][k+vc]=i;
             for(k=0; k<ZN.size(); ++k)
-                for(l=0; l<ZN[0].size(); ++l) {
-                    if(l+vc>=n) {
-                        printf("OVERRRRRRRR\n\n");
-                        exit(1);
-                    }
+                for(l=0; l<ZN[0].size(); ++l)
                     S[k][l+vc]=ZN[k][l];
-                }
             vc+=(int)ZN[0].size();
-            printf(" -- %d eigenvalue found.\n",vc);
+            printf(" -- %d eigenvalue found. --> %d\n",vc,i);
+            if(vc==n-1 && det) { // only one more to go
+                long long trace = 1;
+                for(k=0; k<n-1; ++k)    trace = (trace * D[k][k]) % MOD;
+                D[n-1][n-1] = (det * inverse(trace)) % MOD;
+                printf(" -- last eigenvalue found. --> %lld\n",D[n-1][n-1]);
+                for(k=0; k<n; ++k)  A[k][k] = (A[k][k] + MOD - D[n-1][n-1] + i) % MOD;
+                ZN = Null_Space(A);
+                for(k=0; k<ZN.size(); ++k)  S[k][vc]=ZN[k][0];
+                return;
+            }
+            if(vc==n)   return; //maximum n eigenvalues or eigenvectors.
         }
         for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus one
     }
@@ -424,7 +433,37 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
 
 int main()
 {
-    MOD = 17;
+//    long long i,j,t;
+//    for (i = 3; i <= 100000007; i+=2) {
+//        t = sqrt(i);
+//        bool P=true;
+//        for (j = 2; j <= t; ++j) {
+//            if (!(i % j)) {
+//                P=false;
+//                break;
+//            }
+//        }
+//        if(!P)  continue;
+//        //
+//        printf("prime : %lld\n",i);
+//        vector<bool> v(i,false);
+//        for (j=0; j<i; ++j) {
+//            t = (j*j)%i;
+//            if(v[t]) {
+//                P=false;
+//                break;
+//            }
+//            v[t]=true;
+//        }
+//        if(P) {
+//            printf("POSSIBLE\n",i);
+//            continue;
+//        }
+//    }
+    
+    
+    MOD = 100000007;
+    //MOD = 101;
     Initiation();
     vector<vector<long long>> A = {
 //        {3,5,7,2},
@@ -442,10 +481,10 @@ int main()
         {0,0,3,0},
         {1,1,0,4}
         
-//        {1,1,1,1},
-//        {2,2,2,2},
-//        {3,3,3,3},
-//        {4,4,4,5}
+//        {1,0,0,0},
+//        {0,0,0,0},
+//        {0,0,1,0},
+//        {0,0,0,1}
     },S,D;
     
 //    vector<vector<long long>> NS = Null_Space(A);
@@ -453,12 +492,12 @@ int main()
 //    matrix_print(A * NS);
     
     matrix_diagonalize(A, S, D);
-//    matrix_print(S);
-//    matrix_print(D);
+    matrix_print(S);
+    matrix_print(D);
 //    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
 //    matrix_print(A2);
     
-    long long po = 1000001;
+    long long po = 505958758500;
     for(int i=0; i<4; ++i)  D[i][i] = power(D[i][i],po);
     matrix_print(matrix_power(A, po));
     matrix_print(S * D * matrix_inverse(S));
