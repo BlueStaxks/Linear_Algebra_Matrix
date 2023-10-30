@@ -215,7 +215,7 @@ inline vector<vector<long long>> matrix_inverse(vector<vector<long long>> A) {
         exit(1);
     }
     auto n = A.size();
-    long long i, j, k;
+    long long i, j, k, l;
     vector<vector<long long>> I(n, vector<long long>(n, 0));
     for (i = 0; i < n; ++i)  I[i][i] = 1;
     for (i = 1; i < n; ++i) {
@@ -225,8 +225,10 @@ inline vector<vector<long long>> matrix_inverse(vector<vector<long long>> A) {
             for(j=i; j<n; ++j)
                 if(A[j][i-1]!=0)
                 {
-                    vector<long long> t=A[j];   A[j]=A[i-1];    A[i-1]=t;
-                    t=I[j]; I[j]=I[i-1];    I[i-1]=t;
+                    for(l=0; l<n; ++l)  {
+                        A[j][l] ^= A[i-1][l] ^= A[j][l] ^= A[i-1][l]; //row exchange
+                        I[j][l] ^= I[i-1][l] ^= I[j][l] ^= I[i-1][l];
+                    }
                     P=false;
                     break;
                 }
@@ -239,8 +241,8 @@ inline vector<vector<long long>> matrix_inverse(vector<vector<long long>> A) {
             long long mul = (MOD-A[j][i-1]) * inverse(A[i - 1][i - 1]) % MOD;
             for (k = 0; k < n; ++k)
             {
-                A[j][k] += (A[i - 1][k] * mul); A[j][k] %= MOD;
-                I[j][k] += (I[i - 1][k] * mul); I[j][k] %= MOD;
+                A[j][k] = (A[j][k] + A[i - 1][k] * mul) % MOD;
+                I[j][k] = (I[j][k] + I[i - 1][k] * mul) % MOD;
             }
         }
     }
@@ -253,8 +255,8 @@ inline vector<vector<long long>> matrix_inverse(vector<vector<long long>> A) {
             long long mul = (MOD-A[j][i+1]) * inverse(A[i + 1][i + 1]) % MOD;
             for (k = 0; k < n; ++k)
             {
-                A[j][k] += (A[i + 1][k] * mul); A[j][k] %= MOD;
-                I[j][k] += (I[i + 1][k] * mul); I[j][k] %= MOD;
+                A[j][k] = (A[j][k] + A[i + 1][k] * mul) % MOD;
+                I[j][k] = (I[j][k] + I[i + 1][k] * mul) % MOD;
             }
         }
     }
@@ -265,22 +267,22 @@ inline vector<vector<long long>> matrix_inverse(vector<vector<long long>> A) {
     }
     return I;
 }
-inline long long matrix_determinant(vector<vector<long long>> a) {
-    if (a.size() != a.front().size()) {
+inline long long matrix_determinant(vector<vector<long long>> A) {
+    if (A.size() != A.front().size()) {
         printf("Matrix determinant Error : Matrix is not square\n\n");
         exit(1);
     }
     long long tr = 1;
-    auto n = a.size();
-    long long i, j, k;
+    auto n = A.size();
+    long long i, j, k, l;
     for (i = 1; i < n; ++i) {
-        if (a[i - 1][i - 1]==0)
+        if (A[i - 1][i - 1]==0)
         {
             bool P=true;
             for(j=i; j<n; ++j)
-                if(a[j][i-1]!=0)
+                if(A[j][i-1]!=0)
                 {
-                    vector<long long> t=a[j];   a[j]=a[i-1];    a[i-1]=t;
+                    for(l=0; l<n; ++l)  A[j][l] ^= A[i-1][l] ^= A[j][l] ^= A[i-1][l]; //row exchange
                     tr*=-1;
                     P=false;
                     break;
@@ -288,19 +290,15 @@ inline long long matrix_determinant(vector<vector<long long>> a) {
             if(P)   return 0;
         }
         for (j = i; j < n; ++j) {
-            long long mul = (MOD-a[j][i - 1]) * inverse(a[i - 1][i - 1]) % MOD;
+            long long mul = (MOD-A[j][i - 1]) * inverse(A[i - 1][i - 1]) % MOD;
             if(!mul)  continue;
-            for (k = 0; k < n; ++k) {
-                a[j][k] += a[i - 1][k] * mul;
-                a[j][k] %= MOD;
-            }
+            for (k = 0; k < n; ++k)
+                A[j][k] = (A[j][k] + A[i - 1][k] * mul) % MOD;
         }
     }
-    long long r = tr;
-    for(i=0; i<n; ++i) {
-        r *= a[i][i];
-        r %= MOD;
-    }
+    long long r = tr==1?1:MOD-1;
+    for(i=0; i<n; ++i)
+        r = r * A[i][i] % MOD;
     return r;
 }
 inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
@@ -314,11 +312,7 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
             bool P=true;
             for(j=i-p; j<m; ++j) //row exchange is allowed
                 if(A[j][i-1]!=0) {
-                    for(l=0; l<n; ++l)
-                        A[i-1-p][l] ^= A[j][l] ^= A[i-1-p][l] ^= A[j][l]; //row exchange
-//                    vector<long long> temp = A[i-1-p];
-//                    A[i-1-p] = A[j];
-//                    A[j] = temp;
+                    for(l=0; l<n; ++l)  A[i-1-p][l] ^= A[j][l] ^= A[i-1-p][l] ^= A[j][l]; //row exchange
                     i--; //row exchanged. do it again
                     P=false;
                     break;
@@ -335,10 +329,8 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
         for (j = i - p; j < m; ++j) {
             long long mul = MOD-A[j][i - 1];
             if(mul == 0)  continue;
-            for (k = i - 1; k < n; ++k) {
-                A[j][k] += (A[i - 1 - p][k] * mul);
-                A[j][k] %= MOD;
-            }
+            for (k = i - 1; k < n; ++k)
+                A[j][k] = (A[j][k] + A[i - 1 - p][k] * mul) % MOD;
         }
     }
     if(rank==n) {
@@ -400,7 +392,8 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
     int i,j,k,l,n=(int)A.size(), vc=0,c=0,cp=1, dMOD = (int)MOD/100;
     S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
     vector<vector<long long>> ZN;
-    long long det = matrix_determinant(A);
+    long long trace = 0;
+    for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
     for(i=0; i<MOD; ++i,++c) { //eigenvalue zero to MOD-1
         if(c==dMOD) {
             printf(" -- %d%%.\n",cp++);
@@ -414,10 +407,10 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
                     S[k][l+vc]=ZN[k][l];
             vc+=(int)ZN[0].size();
             printf(" -- %d eigenvalue found. --> %d\n",vc,i);
-            if(vc==n-1 && det) { // only one more to go
-                long long trace = 1;
-                for(k=0; k<n-1; ++k)    trace = (trace * D[k][k]) % MOD;
-                D[n-1][n-1] = (det * inverse(trace)) % MOD;
+            if(vc==n-1) { // only one more to go
+                long long EigSum = 0;
+                for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
+                D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
                 printf(" -- last eigenvalue found. --> %lld\n",D[n-1][n-1]);
                 for(k=0; k<n; ++k)  A[k][k] = (A[k][k] + MOD - D[n-1][n-1] + i) % MOD;
                 ZN = Null_Space(A);
@@ -462,8 +455,8 @@ int main()
 //    }
     
     
-    MOD = 100000007;
-    //MOD = 101;
+    //MOD = 100000007;
+    MOD = 7;
     Initiation();
     vector<vector<long long>> A = {
 //        {3,5,7,2},
@@ -471,15 +464,26 @@ int main()
 //        {6,3,9,17},
 //        {13,5,4,16}
         
+//        {1,0,0,0},
+//        {0,2,0,0},
+//        {0,0,4,0},
+//        {0,0,0,8}
+        
+        {2,0},
+        {0,4}
+        
+//        {1,1},
+//        {1,0}
+        
 //        {1,2,3,4},
 //        {2,3,4,5},
-//        {3,4,5,6},
-//        {4,5,6,7}
+//        {9,4,5,6},
+//        {1,5,6,7}
         
-        {1,0,0,1},
-        {0,2,0,0},
-        {0,0,3,0},
-        {1,1,0,4}
+//        {1,0,0,1},
+//        {0,2,0,0},
+//        {0,0,3,0},
+//        {1,1,0,4}
         
 //        {1,0,0,0},
 //        {0,0,0,0},
@@ -494,13 +498,13 @@ int main()
     matrix_diagonalize(A, S, D);
     matrix_print(S);
     matrix_print(D);
-//    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
-//    matrix_print(A2);
+    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
+    matrix_print(A2);
     
-    long long po = 505958758500;
-    for(int i=0; i<4; ++i)  D[i][i] = power(D[i][i],po);
-    matrix_print(matrix_power(A, po));
-    matrix_print(S * D * matrix_inverse(S));
+    //long long po = 9223372036854775807;
+    long long po = 3;
+    for(int i=0; i<A.size(); ++i)  D[i][i] = power(D[i][i],po);
+    matrix_print(S*D*matrix_inverse(S));
     if(matrix_power(A, po) == S * D * matrix_inverse(S))
         printf("GOOD\n\n");
     
