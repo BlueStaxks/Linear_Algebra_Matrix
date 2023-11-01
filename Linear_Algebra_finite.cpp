@@ -396,7 +396,7 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
     for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
     for(i=0; i<MOD; ++i,++c) { //eigenvalue zero to MOD-1
         if(c==dMOD) {
-            printf(" -- %d%%.\n",cp++);
+            //printf(" -- %d%%.\n",cp++);
             c=0;
         }
         ZN = Null_Space(A);
@@ -406,12 +406,12 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
                 for(l=0; l<ZN[0].size(); ++l)
                     S[k][l+vc]=ZN[k][l];
             vc+=(int)ZN[0].size();
-            printf(" -- %d eigenvalue found. --> %d\n",vc,i);
+            //printf(" -- %d eigenvalue found. --> %d\n",vc,i);
             if(vc==n-1) { // only one more to go
                 long long EigSum = 0;
                 for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
                 D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
-                printf(" -- last eigenvalue found. --> %lld\n",D[n-1][n-1]);
+                //printf(" -- last eigenvalue found. --> %lld\n",D[n-1][n-1]);
                 for(k=0; k<n; ++k)  A[k][k] = (A[k][k] + MOD - D[n-1][n-1] + i) % MOD;
                 ZN = Null_Space(A);
                 for(k=0; k<ZN.size(); ++k)  S[k][vc]=ZN[k][0];
@@ -421,7 +421,7 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
         }
         for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus one
     }
-    printf("\n\n");
+    //printf("\n\n");
 }
 
 int main()
@@ -456,7 +456,7 @@ int main()
     
     
     //MOD = 100000007;
-    MOD = 7;
+    MOD = 101;
     Initiation();
     vector<vector<long long>> A = {
 //        {3,5,7,2},
@@ -469,8 +469,8 @@ int main()
 //        {0,0,4,0},
 //        {0,0,0,8}
         
-        {2,0},
-        {0,4}
+//        {2,0},
+//        {0,4}
         
 //        {1,1},
 //        {1,0}
@@ -480,29 +480,56 @@ int main()
 //        {9,4,5,6},
 //        {1,5,6,7}
         
-//        {1,0,0,1},
-//        {0,2,0,0},
-//        {0,0,3,0},
-//        {1,1,0,4}
+        {1,0,0,1},
+        {0,2,0,0},
+        {0,0,3,0},
+        {1,1,0,4}
         
 //        {1,0,0,0},
 //        {0,0,0,0},
 //        {0,0,1,0},
 //        {0,0,0,1}
     },S,D;
+    vector<vector<long long>> I={{1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1}};
     
-//    vector<vector<long long>> NS = Null_Space(A);
-//    matrix_print(NS);
-//    matrix_print(A * NS);
+    matrix_print(A);
+//    matrix_print(matrix_power(A, 100));
     
-    matrix_diagonalize(A, S, D);
-    matrix_print(S);
-    matrix_print(D);
-    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
-    matrix_print(A2);
+//    matrix_diagonalize(A, S, D);
+//    matrix_print(S);
+//    matrix_print(D);
+//    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
+//    matrix_print(A2);
     
-    //long long po = 9223372036854775807;
-    long long po = 3;
+    
+    //vector<vector<long long>> T1 = matrix_power(A, 50);
+    //vector<vector<long long>> A_1 = matrix_inverse(A);
+    //vector<vector<long long>> T2 = matrix_power(matrix_inverse(A), 50);
+    
+    for(int test=1; test<=500000000; ++test) {
+        
+        vector<vector<long long>> TV(4,vector<long long>(4));
+        for(int i=0; i<4; ++i)
+            for(int j=0; j<4; ++j)
+                TV[i][j]=rand()%MOD;
+        
+        vector<vector<long long>> CV = matrix_power(TV, MOD-1);
+        if(CV == I)
+        {
+            printf("CHECKING...\n");
+            matrix_diagonalize(TV, S, D);
+            if(matrix_determinant(S)==0) {
+                printf("FAILED\n\n");
+                return 0;
+            }
+        }
+    }
+
+//    matrix_print(T1);
+//    matrix_print(T2);
+
+    long long po = 9223372036854775807;
+    //long long po = 3;
     for(int i=0; i<A.size(); ++i)  D[i][i] = power(D[i][i],po);
     matrix_print(S*D*matrix_inverse(S));
     if(matrix_power(A, po) == S * D * matrix_inverse(S))
