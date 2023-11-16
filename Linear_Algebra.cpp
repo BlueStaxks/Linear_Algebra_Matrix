@@ -892,80 +892,40 @@ inline vector<vector<T>> change_of_basis_P(vector<vector<T>> B, vector<vector<T>
 }
 int main()
 {
-    vector<vector<Ratio>> A = {
-//        {1,3,0,2,-1},
-//        {0,0,1,4,-3},
-//        {1,3,1,6,-4} 
-        
-//        {1,2,2,2},
-//        {2,4,6,8},
-//        {3,6,8,10}
-        
-//        {1,2,2,2,2,8},
-//        {2,4,6,82,2,4},
-//        {330,6,8,30,9991,9}
-        
-        {1,2,3},
-        {2,5,9},
-        {3,9,88}
-        
-        
-//        {1,1},
-//        {3,3}
-    }, L,U,Q,R;
-//    vector<Ratio> b = {1,2,30};
-//    QR_decomposition(A, Q, R);
-//    matrix_print(Q,0);
-//    matrix_print(matrix_transpose(Q) * Q,0);
-    
-//    vector<vector<long double>> eval, evec, LD_A;
-//    LD_A = RatioMat_to_LDMat(A);
-//    Eigen_Approx(LD_A, eval, evec, 10000);
-//    matrix_print(eval);
-//    
-//    vector<vector<long double>> vec2 = matrix_transpose(evec);
-////    for(int i=0; i<vec2.size(); ++i) {
-////        vector<long double> vt = Vector_Denormalize(vec2[i]);
-////        vector_print(vt);
-////    }
-//    matrix_print(evec);
-//
-//    matrix_print(evec * eval * matrix_transpose(evec));
-//
-//    vector<vector<long double>> T = matrix_transpose(evec);
-//    for(int i=0; i<T.size() - 1; ++i)
-//        for(int j=i+1; j<T.size(); ++j)
-//            printf("%Lf\n",T[i]*T[j]);
-    
-//    vector<Ratio> r = Ax_b(A, b);
-//    vector_print(r, 0);
-//    vector<Ratio> b2 = A*r;
-//    vector_print(b2, 0);
-//    
-//    vector<vector<Ratio>> NS = Null_Space(A);
-//    matrix_print(NS, 0);
-//    matrix_print(A * NS, 0);
-    
-//    vector<vector<Ratio>> A2 = matrix_full_row_rank(A);
-//    vector<vector<Ratio>> A3 = matrix_full_row_rank(matrix_transpose(A2));
-//    matrix_print(A3, 0);
-    
-    vector<vector<Ratio>> B = {
-        {1,1,-1},
-        {0,1,0},
-        {0,0,1}
-    };
-    vector<vector<Ratio>> C = {
-        {2,-1,1},
-        {-1,3,0},
-        {1,1,0}
-    };
-    vector<vector<Ratio>> R1 = change_of_basis_P(B, C);
-    vector<vector<Ratio>> R2 = change_of_basis_P(C, B);
-    vector<vector<Ratio>> R3 = R1 * R2;
-    matrix_print(R1, 0);
-    matrix_print(R2, 0);
-    matrix_print(R3, 0);
+//    vector<vector<Ratio>> A = {
+////        {1,3,0,2,-1},
+////        {0,0,1,4,-3},
+////        {1,3,1,6,-4} 
+//        
+////        {1,2,2,2},
+////        {2,4,6,8},
+////        {3,6,8,10}
+//        
+////        {1,2,2,2,2,8},
+////        {2,4,6,82,2,4},
+////        {330,6,8,30,9991,9}
+//        
+////        {1,0,0},
+////        {0,3,1},
+////        {0,0,3}
+//        
+//        
+//        {{1,2},{-1,2}},
+//        {{1,2},{1,2}}
+//    }, L,U,Q,R;
 
+    vector<pair<Ratio,Ratio>> data = {{1,1},{2,2},{3,2},{8,16}};
+    int i,j,n=2;
+    vector<vector<Ratio>> A(data.size(), vector<Ratio>(n,0));
+    vector<Ratio> y(data.size());
+    for(i=0; i<data.size(); ++i) {
+        y[i]=data[i].second;
+        A[i][0]=1;
+        for(j=1; j<n; ++j)
+            A[i][j] = Ratio_power(data[i].first, j);
+    }
+    vector<vector<Ratio>> AT = matrix_transpose(A);
+    vector<Ratio> x = matrix_inverse(AT*A)*AT*y;
+    vector_print(x, false);
     return 0;
 }

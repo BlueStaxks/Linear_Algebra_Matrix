@@ -98,10 +98,8 @@ inline vector<vector<long long>> operator * (const vector<vector<long long>> &a,
     int i, j, k;
     for (i = 0; i < a.size(); ++i)
         for (j = 0; j < b.front().size(); ++j)
-            for (k = 0; k < b.size(); ++k) {
-                R[i][j] += a[i][k] * b[k][j];
-                R[i][j] %= MOD;
-            }
+            for (k = 0; k < b.size(); ++k)
+                R[i][j] = (R[i][j] + a[i][k] * b[k][j]) % MOD;
     return R;
 }
 inline vector<long long> operator * (const vector<vector<long long>> &a, const vector<long long> &b) {
@@ -124,10 +122,8 @@ inline long long operator * (const vector<long long> &a, const vector<long long>
         exit(1);
     }
     long long r=0;
-    for(auto i=0; i<a.size(); ++i) {
-        r += a[i]*b[i];
-        r %= MOD;
-    }
+    for(auto i=0; i<a.size(); ++i)
+        r = (r + a[i]*b[i]) % MOD;
     return r;
 }
 inline vector<long long> operator * (const long long &a, const vector<long long> &b) {
@@ -190,6 +186,11 @@ inline vector<long long> Extended_Euclid(long long a, long long b) {
     }
     return {r1,s1,t1};
 }
+inline vector<vector<long long>> I_n(int n) {
+    vector<vector<long long>> I(n, vector<long long>(n,0));
+    for (int i = 0; i < n; ++i)  I[i][i] = 1;
+    return I;
+}
 inline vector<vector<long long>> matrix_transpose(const vector<vector<long long>> &a) {
     vector<vector<long long>> R(a.front().size(), vector<long long>(a.size()));
     int i, j;
@@ -208,6 +209,39 @@ inline vector<vector<long long>> matrix_power(vector<vector<long long>> a, unsig
         a = a * a;
     }
     return res;
+}
+inline long long matrix_rank(vector<vector<long long>> A) {
+    int m = (int)A.size(), n = (int)A[0].size();
+    int i,j,k,l,p=0;
+    long long rank=0;
+    for(i=1; i-1<n && i-1-p<m; ++i)
+    {
+        if(A[i-1-p][i-1]==0) //pivot is zero
+        {
+            bool P=true;
+            for(j=i-p; j<m; ++j) //row exchange is allowed
+                if(A[j][i-1]!=0) {
+                    for(l=0; l<n; ++l)  A[i-1-p][l] ^= A[j][l] ^= A[i-1-p][l] ^= A[j][l]; //row exchange
+                    i--; //row exchanged. do it again
+                    P=false;
+                    break;
+                }
+            if(!P)  continue;
+            p++;
+            continue;
+        }
+        rank++;
+        long long temp = A[i-1-p][i-1];
+        A[i-1-p][i-1]=1;
+        for(j=i; j<n; ++j)  A[i-1-p][j] = (A[i-1-p][j] * inverse(temp)) % MOD;
+        for (j = i - p; j < m; ++j) {
+            long long mul = MOD-A[j][i - 1];
+            if(mul == 0)  continue;
+            for (k = i - 1; k < n; ++k)
+                A[j][k] = (A[j][k] + A[i - 1 - p][k] * mul) % MOD;
+        }
+    }
+    return rank;
 }
 inline vector<vector<long long>> matrix_inverse(vector<vector<long long>> A) {
     if (A.size() != A.front().size()) {
@@ -301,7 +335,7 @@ inline long long matrix_determinant(vector<vector<long long>> A) {
         r = r * A[i][i] % MOD;
     return r;
 }
-inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
+inline vector<vector<long long>> Null_Space(vector<vector<long long>> A, bool Orth) {
     int m = (int)A.size(), n = (int)A[0].size();
     vector<int> piv;
     int i,j,k,l,p=0,rank=0;
@@ -341,10 +375,8 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
         for(j=i-1; j>=0; --j)
         {
             long long mul = MOD-A[j][piv[i]];
-            for(k=piv[i]; k<n; ++k) {
-                A[j][k] += (A[i][k] * mul);
-                A[j][k] %= MOD;
-            }
+            for(k=piv[i]; k<n; ++k)
+                A[j][k] = (A[j][k] + A[i][k] * mul) % MOD;
         }
     for(i=m-1; i>=0; --i) //zero row pop
     {
@@ -361,14 +393,13 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
     vector<pair<int,int>> exc;
     for(i=0; i<rank; ++i) {
         if(piv[i]!=i) {
-            vector<long long> te = TR[i];
-            TR[i] = TR[piv[i]];
-            TR[piv[i]] = te;
+            for(j=0; j<TR[i].size(); ++j)
+                TR[i][j] ^= TR[piv[i]][j] ^= TR[i][j] ^= TR[piv[i]][j];
             exc.push_back({i,piv[i]});
             piv[i]=i;
         }
     }
-    for(p=i; i<n; ++i) 
+    for(p=i; i<n; ++i)
         for(j=0; j<rank; ++j)
             F[i-p][j] = TR[i][j] ? MOD - TR[i][j] : 0; //remaining col of A is not from I
     vector<vector<long long>> N = matrix_transpose(F);
@@ -377,84 +408,111 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A) {
         te[i]=1;
         N.push_back(te); // I padding
     }
-    for(i=(int)exc.size()-1; i>=0; --i) {
-        vector<long long> te = N[exc[i].first];
-        N[exc[i].first] = N[exc[i].second];
-        N[exc[i].second] = te;
+    for(i=(int)exc.size()-1; i>=0; --i)
+        for(j=0; j<N.front().size(); ++j)
+            N[exc[i].first][j] ^= N[exc[i].second][j] ^= N[exc[i].first][j] ^= N[exc[i].second][j];
+    if(!Orth)   return N;
+    vector<vector<long long>> X = matrix_transpose(N);  //G-S process
+    vector<vector<long long>> V = X;
+    vector<long long> DP(2,0);
+    DP[1] = (V[0]*V[0]) % MOD;
+    for(i=1; i<N[0].size(); ++i)
+    {
+        for(j=1; j<=i; ++j)
+        {
+            long long c = (V[j-1] * X[i] % MOD) * inverse(DP[j]) % MOD;
+            for(l=0; l<V[i].size(); ++l)
+                V[i][l] = (V[i][l] + MOD - (c * V[j-1][l] % MOD)) % MOD;
+        }
+        DP.push_back((V[i]*V[i]) % MOD);
+        if(DP.back()==0) {
+            printf("NullSpace's G-S Process Error : Matrix has dependent column\n\n");
+            exit(1);
+        }
     }
-    return N;
+    return matrix_transpose(V);
 }
-inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D) {
+inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     if (A.size() != A.front().size()) {
-        printf("Matrix determinant Error : Matrix is not square\n\n");
+        printf("Matrix diagonalization Error : Matrix is not square\n\n");
         exit(1);
     }
-    int i,j,k,l,n=(int)A.size(), vc=0,c=0,cp=1, dMOD = (int)MOD/100;
+    if (!matrix_determinant(A)) {
+        printf("Invertible matrix only for now\n\n");
+        exit(1);
+    }
+    int i,k,l,n=(int)A.size(), vc=0;
+    S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
+    vector<vector<long long>> ZN, AP = matrix_power(A, MOD-1), AP2 = matrix_power(A, (MOD-1)>>1);
+    if(AP!=I_n(n)) {
+        printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n");
+        exit(1);
+    }
+    for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] + 1) % MOD; //eigenvalue = -1
+    ZN = Null_Space(AP2, Orth);
+    if(!ZN.empty()) {
+        for(k=0; k<ZN.size(); ++k)
+            for(l=0; l<ZN[0].size(); ++l)
+                S[k][l]=ZN[k][l];
+        vc+=(int)ZN[0].size();
+    }
+    for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] - 2 + MOD) % MOD; //eigenvalue = 1
+    ZN = Null_Space(AP2, Orth);
+    if(!ZN.empty()) {
+        for(k=0; k<ZN.size(); ++k)
+            for(l=0; l<ZN[0].size(); ++l)
+                S[k][l+vc]=ZN[k][l];
+    }
+    for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] + 1) % MOD; //back to original
+    matrix_print(AP2);  matrix_print(matrix_inverse(S)*AP2*S);
+    D = matrix_inverse(S) * A * S;
+    matrix_print(D);
+    i=0;
+    return;
+}
+inline int matrix_diagonalize2(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+    if (A.size() != A.front().size()) {
+        printf("Matrix diagonalization Error : Matrix is not square\n\n");
+        exit(1);
+    }
+    int i,j,k,l,n=(int)A.size(), vc=0,c=0, dMOD = (int)MOD/100;
     S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
     vector<vector<long long>> ZN;
     long long trace = 0;
     for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
     for(i=0; i<MOD; ++i,++c) { //eigenvalue zero to MOD-1
-        if(c==dMOD) {
-            //printf(" -- %d%%.\n",cp++);
-            c=0;
-        }
-        ZN = Null_Space(A);
+        ZN = Null_Space(A, Orth);
         if(!ZN.empty()) { // det(A - eigenvalue*I) == 0    <-- eigenvalue found
             for(k=0; k<ZN[0].size(); ++k)   D[k+vc][k+vc]=i;
             for(k=0; k<ZN.size(); ++k)
                 for(l=0; l<ZN[0].size(); ++l)
                     S[k][l+vc]=ZN[k][l];
             vc+=(int)ZN[0].size();
-            //printf(" -- %d eigenvalue found. --> %d\n",vc,i);
+            printf(" -- %d eigenvalue found. --> %d\n",vc,i);
             if(vc==n-1) { // only one more to go
                 long long EigSum = 0;
                 for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
                 D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
-                //printf(" -- last eigenvalue found. --> %lld\n",D[n-1][n-1]);
+                printf(" -- last eigenvalue found. --> %lld\n",D[n-1][n-1]);
                 for(k=0; k<n; ++k)  A[k][k] = (A[k][k] + MOD - D[n-1][n-1] + i) % MOD;
-                ZN = Null_Space(A);
+                ZN = Null_Space(A, Orth);
                 for(k=0; k<ZN.size(); ++k)  S[k][vc]=ZN[k][0];
-                return;
+                return n;
             }
-            if(vc==n)   return; //maximum n eigenvalues or eigenvectors.
+            if(vc==n)   return n; //maximum n eigenvalues or eigenvectors.
         }
-        for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus one
+        for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus I
     }
-    //printf("\n\n");
+    printf("\n\n");
+//    matrix_print(S);
+//    if(matrix_determinant(S)==0) {
+//        printf("Matrix diagonalization Error : Matrix is not diagonalizable. Try Jordan diagonalize.\n\n");
+//        exit(1);
+//    }
+    return vc;
 }
-
 int main()
 {
-//    long long i,j,t;
-//    for (i = 3; i <= 100000007; i+=2) {
-//        t = sqrt(i);
-//        bool P=true;
-//        for (j = 2; j <= t; ++j) {
-//            if (!(i % j)) {
-//                P=false;
-//                break;
-//            }
-//        }
-//        if(!P)  continue;
-//        //
-//        printf("prime : %lld\n",i);
-//        vector<bool> v(i,false);
-//        for (j=0; j<i; ++j) {
-//            t = (j*j)%i;
-//            if(v[t]) {
-//                P=false;
-//                break;
-//            }
-//            v[t]=true;
-//        }
-//        if(P) {
-//            printf("POSSIBLE\n",i);
-//            continue;
-//        }
-//    }
-    
-    
     //MOD = 100000007;
     MOD = 101;
     Initiation();
@@ -465,12 +523,13 @@ int main()
 //        {13,5,4,16}
         
 //        {1,0,0,0},
-//        {0,2,0,0},
-//        {0,0,4,0},
-//        {0,0,0,8}
+//        {0,2,9,0},
+//        {0,9,3,1},
+//        {0,0,1,4}
         
-//        {2,0},
-//        {0,4}
+//        {1,0,0},
+//        {0,0,1},
+//        {0,0,0}
         
 //        {1,1},
 //        {1,0}
@@ -480,60 +539,47 @@ int main()
 //        {9,4,5,6},
 //        {1,5,6,7}
         
-        {1,0,0,1},
-        {0,2,0,0},
-        {0,0,3,0},
-        {1,1,0,4}
+//        {3,5,9,0},
+//        {1,0,0,0},
+//        {0,1,0,0},
+//        {0,0,1,0}
+    
+        {63,63, 0,48,13},
+        {48, 5,89,65,57},
+        {32,69, 1,57,68},
+        {95, 8,46,53,32},
+        {34,100,50,80,70}
+        
         
 //        {1,0,0,0},
 //        {0,0,0,0},
-//        {0,0,1,0},
-//        {0,0,0,1}
-    },S,D;
-    vector<vector<long long>> I={{1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1}};
+//        {0,0,2,0},
+//        {0,0,0,3}
+    },S,D,V,U,E,S2,D2;
+    vector<vector<long long>> I;
     
-    matrix_print(A);
-//    matrix_print(matrix_power(A, 100));
+//    for(long long i=0; i<100; ++i) {
+//        //printf("%lld\n",(int)(pow(3,i)*(1 + (pow(3,i)-1)/2))%MOD);
+//        printf("%d\t%lld\n",i,(int)((i+1)*power(3,i)%MOD));
+//        matrix_print(matrix_power(A, i+1));
+//    }
     
-//    matrix_diagonalize(A, S, D);
-//    matrix_print(S);
-//    matrix_print(D);
-//    vector<vector<long long>> A2 = S * D * matrix_inverse(S);
-//    matrix_print(A2);
+    int i,j;
     
+    matrix_diagonalize(A, S, D, true);
+    matrix_print(S);    matrix_print(D);
+    matrix_print(S * D * matrix_inverse(S));
     
-    //vector<vector<long long>> T1 = matrix_power(A, 50);
-    //vector<vector<long long>> A_1 = matrix_inverse(A);
-    //vector<vector<long long>> T2 = matrix_power(matrix_inverse(A), 50);
+    matrix_diagonalize2(A, S2, D2, true);
+    matrix_print(S2);    matrix_print(D2);
+    matrix_print(S2 * D2 * matrix_inverse(S2));
     
-    for(int test=1; test<=500000000; ++test) {
-        
-        vector<vector<long long>> TV(4,vector<long long>(4));
-        for(int i=0; i<4; ++i)
-            for(int j=0; j<4; ++j)
-                TV[i][j]=rand()%MOD;
-        
-        vector<vector<long long>> CV = matrix_power(TV, MOD-1);
-        if(CV == I)
-        {
-            printf("CHECKING...\n");
-            matrix_diagonalize(TV, S, D);
-            if(matrix_determinant(S)==0) {
-                printf("FAILED\n\n");
-                return 0;
-            }
-        }
-    }
 
-//    matrix_print(T1);
-//    matrix_print(T2);
-
-    long long po = 9223372036854775807;
-    //long long po = 3;
-    for(int i=0; i<A.size(); ++i)  D[i][i] = power(D[i][i],po);
-    matrix_print(S*D*matrix_inverse(S));
-    if(matrix_power(A, po) == S * D * matrix_inverse(S))
-        printf("GOOD\n\n");
     
+    long long po = 9223372036854775807; // 9223372036854775807;
+    long long modpo = po%(MOD-1);
+    for(int i=0; i<A.size(); ++i)  D[i][i] = power(D[i][i],modpo);
+    if(matrix_power(A, po) == S * D * matrix_inverse(S))    printf("GOOD\n\n");
+    else    printf("NOOOOT GOOD....\n\n");
     return 0;
 }
