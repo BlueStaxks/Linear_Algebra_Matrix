@@ -432,6 +432,47 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A, bool Or
     }
     return matrix_transpose(V);
 }
+inline int matrix_diagonalize_slow(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+    if (A.size() != A.front().size()) {
+        printf("Matrix diagonalization Error : Matrix is not square\n\n");
+        exit(1);
+    }
+    int i,j,k,l,n=(int)A.size(), vc=0,c=0, dMOD = (int)MOD/100;
+    S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
+    vector<vector<long long>> ZN;
+    long long trace = 0;
+    for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
+    for(i=0; i<MOD; ++i,++c) { //eigenvalue zero to MOD-1
+        ZN = Null_Space(A, Orth);
+        if(!ZN.empty()) { // det(A - eigenvalue*I) == 0    <-- eigenvalue found
+            for(k=0; k<ZN[0].size(); ++k)   D[k+vc][k+vc]=i;
+            for(k=0; k<ZN.size(); ++k)
+                for(l=0; l<ZN[0].size(); ++l)
+                    S[k][l+vc]=ZN[k][l];
+            vc+=(int)ZN[0].size();
+            printf(" -- %d eigenvalue found. --> %d\n",vc,i);
+            if(vc==n-1) { // only one more to go
+                long long EigSum = 0;
+                for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
+                D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
+                printf(" -- last eigenvalue found. --> %lld\n\n\n",D[n-1][n-1]);
+                for(k=0; k<n; ++k)  A[k][k] = (A[k][k] + MOD - D[n-1][n-1] + i) % MOD;
+                ZN = Null_Space(A, Orth);
+                for(k=0; k<ZN.size(); ++k)  S[k][vc]=ZN[k][0];
+                return n;
+            }
+            if(vc==n)   return n; //maximum n eigenvalues or eigenvectors.
+        }
+        for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus I
+    }
+    printf("\n\n");
+//    matrix_print(S);
+//    if(matrix_determinant(S)==0) {
+//        printf("Matrix diagonalization Error : Matrix is not diagonalizable. Try Jordan diagonalize.\n\n");
+//        exit(1);
+//    }
+    return vc;
+}
 inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     if (A.size() != A.front().size()) {
         printf("Matrix diagonalization Error : Matrix is not square\n\n");
@@ -464,52 +505,29 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
                 S[k][l+vc]=ZN[k][l];
     }
     for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] + 1) % MOD; //back to original
-    matrix_print(AP2);  matrix_print(matrix_inverse(S)*AP2*S);
+    //matrix_print(AP2);  matrix_print(matrix_inverse(S)*AP2*S);
     D = matrix_inverse(S) * A * S;
-    matrix_print(D);
+    matrix_print(S);    matrix_print(D);
+    
+    vector<vector<long long>> S1,D1;
+    matrix_diagonalize_slow(D, S1, D1, false);
+    matrix_print(S1);   
+    vector<vector<long long>> P = {
+        {0,0,1,0,0},
+        {0,0,0,1,0},
+        {1,0,0,0,0},
+        {0,1,0,0,0},
+        {0,0,0,0,1}
+    };
+    matrix_print(S1*P);
+    vector<vector<long long>> FS = S*(S1);
+    matrix_print(FS);
+    matrix_print(FS * (D1) * matrix_inverse(FS));
+    //matrix_print(D1);
+    //matrix_print(matrix_power(D1, (MOD-1)>>1));
+    
     i=0;
     return;
-}
-inline int matrix_diagonalize2(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
-    if (A.size() != A.front().size()) {
-        printf("Matrix diagonalization Error : Matrix is not square\n\n");
-        exit(1);
-    }
-    int i,j,k,l,n=(int)A.size(), vc=0,c=0, dMOD = (int)MOD/100;
-    S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
-    vector<vector<long long>> ZN;
-    long long trace = 0;
-    for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
-    for(i=0; i<MOD; ++i,++c) { //eigenvalue zero to MOD-1
-        ZN = Null_Space(A, Orth);
-        if(!ZN.empty()) { // det(A - eigenvalue*I) == 0    <-- eigenvalue found
-            for(k=0; k<ZN[0].size(); ++k)   D[k+vc][k+vc]=i;
-            for(k=0; k<ZN.size(); ++k)
-                for(l=0; l<ZN[0].size(); ++l)
-                    S[k][l+vc]=ZN[k][l];
-            vc+=(int)ZN[0].size();
-            printf(" -- %d eigenvalue found. --> %d\n",vc,i);
-            if(vc==n-1) { // only one more to go
-                long long EigSum = 0;
-                for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
-                D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
-                printf(" -- last eigenvalue found. --> %lld\n",D[n-1][n-1]);
-                for(k=0; k<n; ++k)  A[k][k] = (A[k][k] + MOD - D[n-1][n-1] + i) % MOD;
-                ZN = Null_Space(A, Orth);
-                for(k=0; k<ZN.size(); ++k)  S[k][vc]=ZN[k][0];
-                return n;
-            }
-            if(vc==n)   return n; //maximum n eigenvalues or eigenvectors.
-        }
-        for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus I
-    }
-    printf("\n\n");
-//    matrix_print(S);
-//    if(matrix_determinant(S)==0) {
-//        printf("Matrix diagonalization Error : Matrix is not diagonalizable. Try Jordan diagonalize.\n\n");
-//        exit(1);
-//    }
-    return vc;
 }
 int main()
 {
@@ -537,9 +555,9 @@ int main()
 //        {1,2,3,4},
 //        {2,3,4,5},
 //        {9,4,5,6},
-//        {1,5,6,7}
+//        {1,5,2,7}
         
-//        {3,5,9,0},
+//        {3,5,9,3},
 //        {1,0,0,0},
 //        {0,1,0,0},
 //        {0,0,1,0}
@@ -566,11 +584,11 @@ int main()
     
     int i,j;
     
-    matrix_diagonalize(A, S, D, true);
+    matrix_diagonalize(A, S, D, false);
     matrix_print(S);    matrix_print(D);
     matrix_print(S * D * matrix_inverse(S));
     
-    matrix_diagonalize2(A, S2, D2, true);
+    matrix_diagonalize_slow(A, S2, D2, false);
     matrix_print(S2);    matrix_print(D2);
     matrix_print(S2 * D2 * matrix_inverse(S2));
     
