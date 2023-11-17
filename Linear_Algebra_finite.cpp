@@ -432,6 +432,90 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A, bool Or
     }
     return matrix_transpose(V);
 }
+inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b) {
+    if(A.size() != b.size()) {
+        printf("Ax=b calculation Error : Size is different\n\n");
+        exit(1);
+    }
+    int m = (int)A.size(), n = (int)A[0].size();
+    n++;
+    vector<vector<long long>> R(m,vector<long long>(n,0));
+    vector<int> piv;
+    int i,j,k,p=0,elimi=0;
+    for(i=0; i<m; ++i)
+    {
+        for(j=0; j<n-1; ++j)
+            R[i][j]=A[i][j];
+        R[i][j]=b[i];
+    }
+    for(i=1; i<n && i-1-p<m; ++i)
+    {
+        if(R[i-1-p][i-1]==0)
+        {
+            bool P=true;
+            for(j=i-p; j<m; ++j)
+                if(R[j][i-1]!=0) {
+                    vector<long long> temp = R[i-1-p];
+                    R[i-1-p] = R[j];
+                    R[j] = temp;
+                    i--;
+                    P=false;
+                    break;
+                }
+            if(!P)  continue;
+            p++;
+            continue;
+        }
+        piv.push_back(i-1);
+        elimi++;
+        long long temp = R[i-1-p][i-1];
+        R[i-1-p][i-1]=1;
+        for(j=i; j<n; ++j)    R[i-1-p][j] = (R[i-1-p][j] * inverse(temp)) % MOD;
+        for (j = i - p; j < m; ++j) {
+            long long mul = MOD-R[j][i - 1];
+            if(mul == 0)  continue;
+            for (k = i - 1; k < n; ++k)
+                R[j][k] = (R[j][k] + R[i - 1 - p][k] * mul) % MOD;
+        }
+    }
+    for(i=(int)piv.size()-1; i>0; --i) //upper elimination
+        for(j=i-1; j>=0; --j)
+        {
+            long long mul = MOD-R[j][piv[i]];
+            for(k=piv[i]; k<n; ++k)
+                R[j][k] = (R[j][k] + R[i][k] * mul) % MOD;
+        }
+    for(i=m-1; i>=0; --i) //zero row solvablity
+    {
+        bool P=false;
+        for(j=0; j<n-1; ++j)
+            if(R[i][j]!=0) {
+                P=true;
+                break;
+            }
+        if(P)   break;
+        if(R[i][n-1]!=0) {
+            printf("Ax=b calculation Error : This System is Not Solvable\n\n");
+            //exit(1);
+            return {0};
+        }
+        R.pop_back();
+        b.pop_back();
+    }
+    if(R.size() == R[0].size()-1) {
+        vector<long long> r(R.size());
+        for(i=0; i<r.size(); ++i)   r[i]=R[i][n-1];
+        return r;
+    }
+    vector<long long> r(n-1,0);
+    for(i=0, p=0; i<n-1; ++i) {
+        if(piv[p]==i) {
+            r[i]=R[p][n-1];
+            p++;
+        }
+    }
+    return r;
+}
 inline int matrix_diagonalize_slow(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     if (A.size() != A.front().size()) {
         printf("Matrix diagonalization Error : Matrix is not square\n\n");
@@ -505,24 +589,16 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
                 S[k][l+vc]=ZN[k][l];
     }
     for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] + 1) % MOD; //back to original
-    //matrix_print(AP2);  matrix_print(matrix_inverse(S)*AP2*S);
+//    matrix_print(AP2);  matrix_print(matrix_inverse(S)*AP2*S);
     D = matrix_inverse(S) * A * S;
-    matrix_print(S);    matrix_print(D);
-    
-    vector<vector<long long>> S1,D1;
-    matrix_diagonalize_slow(D, S1, D1, false);
-    matrix_print(S1);   
-    vector<vector<long long>> P = {
-        {0,0,1,0,0},
-        {0,0,0,1,0},
-        {1,0,0,0,0},
-        {0,1,0,0,0},
-        {0,0,0,0,1}
-    };
-    matrix_print(S1*P);
-    vector<vector<long long>> FS = S*(S1);
-    matrix_print(FS);
-    matrix_print(FS * (D1) * matrix_inverse(FS));
+//    matrix_print(S);    matrix_print(D);
+//    
+//    vector<vector<long long>> S1,D1;
+//    matrix_diagonalize_slow(D, S1, D1, false);
+//    matrix_print(S1);
+//    vector<vector<long long>> FS = S*S1;
+//    matrix_print(FS);
+//    matrix_print(FS * D1 * matrix_inverse(FS));
     //matrix_print(D1);
     //matrix_print(matrix_power(D1, (MOD-1)>>1));
     
@@ -586,11 +662,29 @@ int main()
     
     matrix_diagonalize(A, S, D, false);
     matrix_print(S);    matrix_print(D);
-    matrix_print(S * D * matrix_inverse(S));
+    //matrix_print(S * D * matrix_inverse(S));
     
     matrix_diagonalize_slow(A, S2, D2, false);
     matrix_print(S2);    matrix_print(D2);
-    matrix_print(S2 * D2 * matrix_inverse(S2));
+    //matrix_print(S2 * D2 * matrix_inverse(S2));
+    
+    vector<vector<long long>> P = {
+        {0,0,1,0,0},
+        {0,0,0,1,0},
+        {1,0,0,0,0},
+        {0,1,0,0,0},
+        {0,0,0,0,1}
+    };
+    matrix_print(S * (D2*P) * matrix_inverse(S));
+    
+    vector<vector<long long>> TV1 = matrix_transpose(S);
+    vector<vector<long long>> TV2 = matrix_transpose(S2);
+    for(i=0; i<3; ++i)  TV1.pop_back();
+    TV1 = matrix_transpose(TV1);
+    for(i=0; i<5; ++i) {
+        vector<long long> x1 = Ax_b(TV1, S2[i]);
+        vector_print(x1);
+    }
     
 
     
