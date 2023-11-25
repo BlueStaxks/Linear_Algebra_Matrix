@@ -516,9 +516,17 @@ inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b)
     }
     return r;
 }
-inline int matrix_diagonalize_slow(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     if (A.size() != A.front().size()) {
         printf("Matrix diagonalization Error : Matrix is not square\n\n");
+        exit(1);
+    }
+    if (!matrix_determinant(A)) {
+        printf("Matrix diagonalization Error : Try Invertible matrix\n\n");
+        exit(1);
+    }
+    if (matrix_power(A, MOD-1) != I_n((int)A.size())) {
+        printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
         exit(1);
     }
     int i,j,k,l,n=(int)A.size(), vc=0,c=0, dMOD = (int)MOD/100;
@@ -534,30 +542,26 @@ inline int matrix_diagonalize_slow(vector<vector<long long>> A, vector<vector<lo
                 for(l=0; l<ZN[0].size(); ++l)
                     S[k][l+vc]=ZN[k][l];
             vc+=(int)ZN[0].size();
-            printf(" -- %d eigenvalue found. --> %d\n",vc,i);
+            //printf(" -- %d eigenvalue found. --> %d\n",vc,i);
             if(vc==n-1) { // only one more to go
                 long long EigSum = 0;
                 for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
                 D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
-                printf(" -- last eigenvalue found. --> %lld\n\n\n",D[n-1][n-1]);
+                //printf(" -- last eigenvalue found. --> %lld\n\n\n",D[n-1][n-1]);
                 for(k=0; k<n; ++k)  A[k][k] = (A[k][k] + MOD - D[n-1][n-1] + i) % MOD;
                 ZN = Null_Space(A, Orth);
                 for(k=0; k<ZN.size(); ++k)  S[k][vc]=ZN[k][0];
-                return n;
+                return;
             }
-            if(vc==n)   return n; //maximum n eigenvalues or eigenvectors.
+            if(vc==n)   return; //maximum n eigenvalues or eigenvectors.
         }
         for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus I
     }
-    printf("\n\n");
-//    matrix_print(S);
-//    if(matrix_determinant(S)==0) {
-//        printf("Matrix diagonalization Error : Matrix is not diagonalizable. Try Jordan diagonalize.\n\n");
-//        exit(1);
-//    }
-    return vc;
+    //printf("\n\n");
+    //matrix_print(S);
+    return;
 }
-inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+inline void matrix_diagonalize_almost(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     if (A.size() != A.front().size()) {
         printf("Matrix diagonalization Error : Matrix is not square\n\n");
         exit(1);
@@ -581,6 +585,7 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
                 S[k][l]=ZN[k][l];
         vc+=(int)ZN[0].size();
     }
+    //matrix_print(AP2 * ZN);
     for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] - 2 + MOD) % MOD; //eigenvalue = 1
     ZN = Null_Space(AP2, Orth);
     if(!ZN.empty()) {
@@ -588,11 +593,14 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
             for(l=0; l<ZN[0].size(); ++l)
                 S[k][l+vc]=ZN[k][l];
     }
-    for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] + 1) % MOD; //back to original
+    //matrix_print(AP2 * ZN);
+//    for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] + 1) % MOD; //back to original
 //    matrix_print(AP2);  matrix_print(matrix_inverse(S)*AP2*S);
     D = matrix_inverse(S) * A * S;
-//    matrix_print(S);    matrix_print(D);
-//    
+//    matrix_print(A * S);
+//    matrix_print(S * D); //AP2's S
+//    matrix_print(D);
+//
 //    vector<vector<long long>> S1,D1;
 //    matrix_diagonalize_slow(D, S1, D1, false);
 //    matrix_print(S1);
@@ -605,6 +613,50 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
     i=0;
     return;
 }
+
+inline void func1() {
+    int N=10,c=0,i,j,k;
+    vector<vector<long long>> I(N,vector<long long>(N,0)),S,D;
+    for(i=0; i<N; ++i)  I[i][i]=1;
+    for(int trial=1; trial<1000000000; ++trial) {
+        vector<vector<long long>> tm = I;
+        for(i=0; i<N-1; ++i) {
+            for(j=i+1; j<N; ++j) {
+                long long mul = rand()%MOD;
+                for(k=0; k<N; ++k)
+                    tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+            }
+        }
+        for(i=N-1; i>0; --i) {
+            for(j=i-1; j>=0; --j) {
+                long long mul = rand()%MOD;
+                for(k=0; k<N; ++k)
+                    tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+            }
+        }
+        if(matrix_power(tm, MOD-1)!=I)  continue;
+        c++;
+        printf("%d / %d\n",c,trial);
+        matrix_diagonalize(tm, S, D, false);
+    }
+}
+inline void func2() {
+    long long po = 9223372036854775807; // 9223372036854775807;
+    long long modpo = po%(MOD-1);
+    vector<vector<long long>> A = {
+        {63,63, 0,48,13},
+        {48, 5,89,65,57},
+        {32,69, 1,57,68},
+        {95, 8,46,53,32},
+        {34,100,50,80,70}
+    },D,S;
+    matrix_diagonalize_almost(A, S, D, false);
+    for(int i=0; i<A.size(); ++i)  D[i][i] = power(D[i][i],modpo);
+    if(matrix_power(A, po) == S * D * matrix_inverse(S))    printf("GOOD\n\n");
+    else    printf("NOOOOT GOOD....\n\n");
+}
+
+
 int main()
 {
     //MOD = 100000007;
@@ -620,13 +672,6 @@ int main()
 //        {0,2,9,0},
 //        {0,9,3,1},
 //        {0,0,1,4}
-        
-//        {1,0,0},
-//        {0,0,1},
-//        {0,0,0}
-        
-//        {1,1},
-//        {1,0}
         
 //        {1,2,3,4},
 //        {2,3,4,5},
@@ -650,48 +695,40 @@ int main()
 //        {0,0,2,0},
 //        {0,0,0,3}
     },S,D,V,U,E,S2,D2;
-    vector<vector<long long>> I;
+    //vector<vector<long long>> I;
     
-//    for(long long i=0; i<100; ++i) {
-//        //printf("%lld\n",(int)(pow(3,i)*(1 + (pow(3,i)-1)/2))%MOD);
-//        printf("%d\t%lld\n",i,(int)((i+1)*power(3,i)%MOD));
-//        matrix_print(matrix_power(A, i+1));
-//    }
+    int i,j,k;
     
-    int i,j;
+    //matrix_diagonalize(A, S, D, false);
     
     matrix_diagonalize(A, S, D, false);
     matrix_print(S);    matrix_print(D);
-    //matrix_print(S * D * matrix_inverse(S));
+    matrix_print(matrix_power(D, 50));
+    //matrix_print(S * matrix_power(D, (MOD-1)>>1) * matrix_inverse(S));
     
-    matrix_diagonalize_slow(A, S2, D2, false);
+    vector<vector<long long>> A50 = matrix_power(A, (MOD-1)>>1);
+//    matrix_print(A50);
+    matrix_diagonalize(A50, S2, D2, false);
     matrix_print(S2);    matrix_print(D2);
-    //matrix_print(S2 * D2 * matrix_inverse(S2));
     
-    vector<vector<long long>> P = {
-        {0,0,1,0,0},
-        {0,0,0,1,0},
-        {1,0,0,0,0},
-        {0,1,0,0,0},
-        {0,0,0,0,1}
-    };
-    matrix_print(S * (D2*P) * matrix_inverse(S));
+//    vector<vector<long long>> P = {
+//        {0,0,1,0,0},
+//        {0,0,0,1,0},
+//        {1,0,0,0,0},
+//        {0,1,0,0,0},
+//        {0,0,0,0,1}
+//    };
+//    S2 = S2 * P;    D2 = D2 * P;
+//    matrix_print(S2 * D2 * matrix_inverse(S2));
     
     vector<vector<long long>> TV1 = matrix_transpose(S);
     vector<vector<long long>> TV2 = matrix_transpose(S2);
-    for(i=0; i<3; ++i)  TV1.pop_back();
-    TV1 = matrix_transpose(TV1);
+    //for(i=0; i<2; ++i)  TV2.pop_back();
+    //TV1 = matrix_transpose(TV1);
     for(i=0; i<5; ++i) {
-        vector<long long> x1 = Ax_b(TV1, S2[i]);
-        vector_print(x1);
+        vector_print(Ax_b(S2, TV1[i]));
     }
-    
-
-    
-    long long po = 9223372036854775807; // 9223372036854775807;
-    long long modpo = po%(MOD-1);
-    for(int i=0; i<A.size(); ++i)  D[i][i] = power(D[i][i],modpo);
-    if(matrix_power(A, po) == S * D * matrix_inverse(S))    printf("GOOD\n\n");
-    else    printf("NOOOOT GOOD....\n\n");
-    return 0;
+    for(i=0; i<5; ++i) {
+        vector_print(Ax_b(S, TV2[i]));
+    }
 }
