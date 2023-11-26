@@ -132,6 +132,13 @@ inline vector<long long> operator * (const long long &a, const vector<long long>
         R[i] = (a*b[i])%MOD;;
     return R;
 }
+inline vector<vector<long long>> operator * (const long long &a, const vector<vector<long long>> &b) {
+    vector<vector<long long>> R(b.size(), vector<long long>(b.front().size()));
+    for(auto i=0; i<b.size(); ++i)
+        for(auto j=0; j<b.front().size(); ++j)
+            R[i][j] = (a*b[i][j])%MOD;;
+    return R;
+}
 inline vector<vector<long long>> operator + (const vector<vector<long long>> &a, const vector<vector<long long>> &b) {
     if (a.front().size() != b.front().size() || a.size() != b.size()) {
         printf("Matrix Addition Error : Matrix size does not match\n\n");
