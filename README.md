@@ -34,7 +34,7 @@ normalize(), Ratio_print(), Ratio_power()
 
 For Matrix : 
 
-==, !=, *, +. -
+==, !=, *, +, -
 
 
 matrix_transpose()
