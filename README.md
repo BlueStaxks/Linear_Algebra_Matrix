@@ -65,6 +65,57 @@ change_of_basis_P()      // This function uses 2 basis and make change-of-basis 
 
 Vector's multiplication and Matrix_vector multiplication are also defined.
 
+
+
+
+# Galois_Field_Matrix
+ 
+
+Linear_Algebra_finite is about Galois field.
+
+You can set modular value yourself. it must be a prime number.
+
+only long long type is available.
+
+
+
+----------------------
+-----------------------
+
+This code includes following functions.
+
+For long long type :
+
+inverse(), power(), gcd(), decompose(), divisior(), Extended_Euclid()
+
+-----------------------
+
+For Matrix : 
+
+==, !=, *, +, -
+
+matrix_transpose()
+
+matrix_power(), matrix_print()
+
+matrix_rank()
+
+matrix_inverse()
+
+matrix_determinant()
+
+Null_Space()
+
+Ax=b()                   // This function finds x. if there is more than one solution, this function will return particular solution.
+
+matrix_diagonalize()     // This function do brute force way to find all eigenvalues.
+
+matrix_diagonalize_fast()// This function do faster way to diagonalize. see document about Galois Field Matrix in this repository.
+
+---------------------
+
+Vector's multiplication and Matrix_vector multiplication are also defined.
+
 Use main() to do your calculations!!
 
 Good Luck
