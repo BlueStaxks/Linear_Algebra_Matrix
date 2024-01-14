@@ -75,7 +75,9 @@ Vector's multiplication and Matrix_vector multiplication are also defined.
 
 Linear_Algebra_finite is about Galois field.
 
-You can set modular value yourself. it must be a prime number.
+You can set the modular value yourself. it must be a prime number.
+
+The code will run Initiation() with your modular number.
 
 only long long type is available.
 
@@ -112,7 +114,7 @@ Ax=b()                   // This function finds x. if there is more than one sol
 
 matrix_diagonalize()     // This function do brute force way to find all eigenvalues.
 
-matrix_diagonalize_fast()// This function do faster way to diagonalize. see document about Galois Field Matrix in this repository.
+matrix_diagonalize_fast()// This function do faster way to diagonalize. see document about Galois Field Matrix in this repository. (The document is not yet fully written)
 
 ---------------------
 
