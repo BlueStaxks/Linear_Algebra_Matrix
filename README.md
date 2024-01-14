@@ -70,7 +70,7 @@ Vector's multiplication and Matrix_vector multiplication are also defined.
 ---------------------------
 
 
-# Galois_Field_Matrix
+# Linear_Algebra_Matrix(Galois Field)
  
 
 Linear_Algebra_finite is about Galois field.
