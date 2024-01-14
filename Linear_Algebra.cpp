@@ -658,7 +658,7 @@ inline void Eigen_Approx(vector<vector<Ratio>>& A, vector<vector<Ratio>>& e_val,
 }
 template <typename T>
 inline vector<vector<T>> Null_Space(vector<vector<T>> A) {
-    int m = (int)A.size(), n = (int)A[0].size();
+    int m = (int)A.size(), n = (int)A[0].size();//m row, n column
     vector<int> piv;
     int i,j,k,p=0,rank=0;
     for(i=1; i-1<n && i-1-p<m; ++i)
@@ -878,6 +878,15 @@ inline vector<vector<T>> matrix_full_row_rank(vector<vector<T>> A) {
             FRA.push_back(A2[i]);
     return FRA;
 }
+//template <typename T>
+//inline void SVD(vector<vector<T>> A, vector<vector<T>> V, vector<vector<T>> E, vector<vector<T>> U) {
+//    vector<vector<T>> ATA = matrix_transpose(A) * A;
+//}
+//template <>
+//inline void SVD(vector<vector<Ratio>> A, vector<vector<Ratio>> V, vector<vector<Ratio>> E, vector<vector<Ratio>> U) {
+//    printf("Ratio type does not support square root value. try with long double.\n\n\n");
+//    exit(1);
+//}
 template <typename T>
 inline vector<vector<T>> change_of_basis_P(vector<vector<T>> B, vector<vector<T>> C) { //B to C
     if(matrix_determinant(B)==0 || matrix_determinant(C)==0) {
@@ -914,8 +923,14 @@ int main()
 //        {{1,2},{1,2}}
 //    }, L,U,Q,R;
 
-    vector<pair<Ratio,Ratio>> data = {{1,1},{2,2},{3,2},{8,16}};
+    vector<pair<Ratio,Ratio>> data = {{0,4},{1,1},{2,0}};
     int i,j,n=2;
+    
+    int k=1;
+    for(i=1; i<=19; ++i)
+        k = (k*7) % 23;
+    printf("%d\n",k);
+    
     vector<vector<Ratio>> A(data.size(), vector<Ratio>(n,0));
     vector<Ratio> y(data.size());
     for(i=0; i<data.size(); ++i) {
@@ -924,8 +939,18 @@ int main()
         for(j=1; j<n; ++j)
             A[i][j] = Ratio_power(data[i].first, j);
     }
+    //matrix_print(A, false);
     vector<vector<Ratio>> AT = matrix_transpose(A);
     vector<Ratio> x = matrix_inverse(AT*A)*AT*y;
+    vector<Ratio> t1 = A*x;
+    Ratio s=0;
+    for(i=0; i<t1.size(); ++i) {
+        s = s + Ratio_power(t1[i] - data[i].second, 2);
+        Ratio_power(t1[i] - data[i].second, 2).Ratio_print(false);
+    }
+    printf("\n");
     vector_print(x, false);
+    printf("error power sum : %lld / %lld\n",s.a,s.b);
+    
     return 0;
 }

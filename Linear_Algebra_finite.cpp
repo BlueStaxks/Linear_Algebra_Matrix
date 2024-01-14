@@ -1,11 +1,13 @@
+#include <set>
 #include <vector>
 #include <iostream>
+#include <algorithm>
 using namespace std;
 long long MOD = 10e9; //should be inside of INT32 range. It's GF so MOD must be a prime.
+long long primitive;
 vector<int> int_inverse;
-void Initiation() {
-    int_inverse.resize(MOD,0);
-}
+vector<long long> MOD_decompose;
+vector<vector<int>> ones_roots;
 inline long long inverse(long long a) {
     if(!a) {
         printf("Integer Inverse Error : 0 has no inverse.\n\n");
@@ -45,6 +47,54 @@ inline long long gcd(long long a, long long b) {
         b = n;
     }
     return a;
+}
+inline vector<long long> decompose(long long a) {
+    vector<long long> r;
+    while(!(a&1)) {
+        r.push_back(2);
+        a>>=1;
+    }
+    for(long long i=3; i<=sqrt(a); i+=2)
+        if(a%i==0) {
+            r.push_back(i);
+            a/=i;
+        }
+    r.push_back(a);
+    return r;
+}
+inline vector<long long> divisor(long long a) {
+    vector<long long> r;
+    for(long long i = 1; i <= sqrt(a); ++i)
+        if (a % i == 0) {
+            r.push_back(i);
+            if (i*i!=a) r.push_back(a / i);
+        }
+    sort(r.begin(), r.end());
+    return r;
+}
+void Initiation() {
+    int_inverse.resize(MOD,0);
+    MOD_decompose = decompose(MOD-1);
+    vector<long long> MOD_di = divisor(MOD-1);
+    for(long long i=2; i<MOD; ++i) {
+        bool P=true;
+        for(int j=1; j<MOD_di.size()-1; ++j)
+            if(power(i,MOD_di[j])==1) {
+                P=false;
+                break;
+            }
+        if(P) {
+            primitive=i; //find smalleset primitive root
+            break;
+        }
+    }
+//    ones_roots.resize(MOD);
+//    for(int i=1; i<MOD; ++i)
+//        for(int j=0; j<MOD_di.size(); ++j)
+//            if(power(i,MOD_di[j])==1) {
+//                ones_roots[MOD_di[j]].push_back(i); //calculate order of all numbers
+//                break;
+//            }
 }
 
 template <typename T>
@@ -536,12 +586,13 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
         printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
         exit(1);
     }
-    int i,j,k,l,n=(int)A.size(), vc=0,c=0, dMOD = (int)MOD/100;
+    int i,j,k,l,n=(int)A.size(), vc=0;
+    S.clear();  D.clear();
     S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
     vector<vector<long long>> ZN;
     long long trace = 0;
     for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
-    for(i=0; i<MOD; ++i,++c) { //eigenvalue zero to MOD-1
+    for(i=0; i<MOD; ++i) { //eigenvalue zero to MOD-1
         ZN = Null_Space(A, Orth);
         if(!ZN.empty()) { // det(A - eigenvalue*I) == 0    <-- eigenvalue found
             for(k=0; k<ZN[0].size(); ++k)   D[k+vc][k+vc]=i;
@@ -549,7 +600,7 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
                 for(l=0; l<ZN[0].size(); ++l)
                     S[k][l+vc]=ZN[k][l];
             vc+=(int)ZN[0].size();
-            //printf(" -- %d eigenvalue found. --> %d\n",vc,i);
+            //printf(" -- total %d eigenvalues found. --> %d\n",vc,i);
             if(vc==n-1) { // only one more to go
                 long long EigSum = 0;
                 for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
@@ -562,13 +613,13 @@ inline void matrix_diagonalize(vector<vector<long long>> A, vector<vector<long l
             }
             if(vc==n)   return; //maximum n eigenvalues or eigenvectors.
         }
-        for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus I
+        for(j=0; j<n; ++j)  A[j][j] = (A[j][j] + MOD - 1) % MOD; //minus I     (we are trying every possible number as eigenvalue)
     }
     //printf("\n\n");
     //matrix_print(S);
     return;
 }
-inline void matrix_diagonalize_almost(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     if (A.size() != A.front().size()) {
         printf("Matrix diagonalization Error : Matrix is not square\n\n");
         exit(1);
@@ -577,53 +628,76 @@ inline void matrix_diagonalize_almost(vector<vector<long long>> A, vector<vector
         printf("Invertible matrix only for now\n\n");
         exit(1);
     }
-    int i,k,l,n=(int)A.size(), vc=0;
-    S.resize(n,vector<long long>(n,0));    D.resize(n,vector<long long>(n,0));
-    vector<vector<long long>> ZN, AP = matrix_power(A, MOD-1), AP2 = matrix_power(A, (MOD-1)>>1);
-    if(AP!=I_n(n)) {
-        printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n");
+    int i,j,k,l,n=(int)A.size(), vc=0, powC=((int)MOD-1), c=0;
+    vector<vector<long long>> ZN;
+    S.resize(n,vector<long long>(n,0));
+    D.resize(n,vector<long long>(n,0));
+    vector<vector<long long>> I=I_n(n);
+    if (matrix_power(A, MOD-1) != I) {
+        printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
         exit(1);
     }
-    for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] + 1) % MOD; //eigenvalue = -1
-    ZN = Null_Space(AP2, Orth);
-    if(!ZN.empty()) {
-        for(k=0; k<ZN.size(); ++k)
-            for(l=0; l<ZN[0].size(); ++l)
-                S[k][l]=ZN[k][l];
-        vc+=(int)ZN[0].size();
+    vector<long long> prev_roots={1};
+    vector<long long> roots={1,MOD-1};
+    for(i=1; i<MOD_decompose.size(); ++i,vc=0) {
+        prev_roots.clear();
+        powC/=MOD_decompose[i-1];
+        for(j=0; j<roots.size() && vc<n; ++j) {
+            long long rank = matrix_rank( matrix_power(A, powC) - roots[j]*I );
+            vc+=n-rank;
+            if(rank!=n) prev_roots.push_back(roots[j]);
+        }
+        roots.clear();
+        for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part
+            for(k=1,c=0; k<MOD && c<MOD_decompose[i]; ++k)
+                if(power(k,MOD_decompose[i])==prev_roots[j]) {
+                    roots.push_back(k);
+                    c++;
+                }
+//            long long seed=-1;
+//            if(prev_roots[j]==1) //often happens
+//                seed=(MOD-1) * inverse(MOD_decompose[i])%MOD;
+//            else
+//                for(k=1; k<MOD; ++k)
+//                    if(power(primitive,k)==prev_roots[j]) {
+//                        seed=k * inverse(MOD_decompose[i])%MOD;
+//                        break;
+//                    }
+//            long long seed2 = power(primitive,seed);
+//            for(k=1; k<=i; ++k)
+//                for(l=0; l<ones_roots[MOD_decompose[k]].size(); ++l)
+//                    roots.push_back(seed2 * ones_roots[MOD_decompose[k]][l] % MOD);
+        }
     }
-    //matrix_print(AP2 * ZN);
-    for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] - 2 + MOD) % MOD; //eigenvalue = 1
-    ZN = Null_Space(AP2, Orth);
-    if(!ZN.empty()) {
-        for(k=0; k<ZN.size(); ++k)
-            for(l=0; l<ZN[0].size(); ++l)
-                S[k][l+vc]=ZN[k][l];
+    long long trace = 0;
+    for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
+    //sort(roots.begin(), roots.end());
+    for(i=0,vc=0; i<roots.size(); ++i) { //eigenvalue zero to MOD-1
+        ZN = Null_Space(A - roots[i]*I, Orth);
+        if(!ZN.empty()) { // det(A - eigenvalue*I) == 0    <-- eigenvalue found
+            for(k=0; k<ZN[0].size(); ++k)   D[k+vc][k+vc]=roots[i];
+            for(k=0; k<ZN.size(); ++k)
+                for(l=0; l<ZN[0].size(); ++l)
+                    S[k][l+vc]=ZN[k][l];
+            vc+=(int)ZN[0].size();
+            //printf(" -- total %d eigenvalues found. --> %d\n",vc,i);
+            if(vc==n-1) { // only one more to go
+                long long EigSum = 0;
+                for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
+                D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
+                //printf(" -- last eigenvalue found. --> %lld\n\n\n",D[n-1][n-1]);
+                ZN = Null_Space(A - D[n-1][n-1]*I, Orth);
+                for(k=0; k<ZN.size(); ++k)  S[k][vc]=ZN[k][0];
+                return;
+            }
+            if(vc==n)   return; //maximum n eigenvectors.
+        }
     }
-    //matrix_print(AP2 * ZN);
-//    for(i=0; i<n; ++i)  AP2[i][i] = (AP2[i][i] + 1) % MOD; //back to original
-//    matrix_print(AP2);  matrix_print(matrix_inverse(S)*AP2*S);
-    D = matrix_inverse(S) * A * S;
-//    matrix_print(A * S);
-//    matrix_print(S * D); //AP2's S
-//    matrix_print(D);
-//
-//    vector<vector<long long>> S1,D1;
-//    matrix_diagonalize_slow(D, S1, D1, false);
-//    matrix_print(S1);
-//    vector<vector<long long>> FS = S*S1;
-//    matrix_print(FS);
-//    matrix_print(FS * D1 * matrix_inverse(FS));
-    //matrix_print(D1);
-    //matrix_print(matrix_power(D1, (MOD-1)>>1));
-    
-    i=0;
     return;
 }
-
 inline void func1() {
-    int N=10,c=0,i,j,k;
-    vector<vector<long long>> I(N,vector<long long>(N,0)),S,D;
+    int N=8,c=0,i,j,k;
+    vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
     for(i=0; i<N; ++i)  I[i][i]=1;
     for(int trial=1; trial<1000000000; ++trial) {
         vector<vector<long long>> tm = I;
@@ -643,8 +717,17 @@ inline void func1() {
         }
         if(matrix_power(tm, MOD-1)!=I)  continue;
         c++;
-        printf("%d / %d\n",c,trial);
-        matrix_diagonalize(tm, S, D, false);
+        printf("%d / %d\t\t%lf%%\n",c,trial,100*c/(double)trial);
+        //matrix_diagonalize(tm, S1, D1, false);
+        matrix_diagonalize(tm, S2, D2, false);
+        if(tm * S2 != S2 * D2 || matrix_determinant(S2)==0) {
+            printf("NOT GOOD...\n\n");
+            matrix_print(tm);
+            matrix_print(S2 * D2 * matrix_inverse(S2));
+            matrix_print(D2);
+            exit(1);
+        }
+        //matrix_print(tm);
     }
 }
 inline void func2() {
@@ -657,10 +740,29 @@ inline void func2() {
         {95, 8,46,53,32},
         {34,100,50,80,70}
     },D,S;
-    matrix_diagonalize_almost(A, S, D, false);
+    matrix_diagonalize_fast(A, S, D, false);
     for(int i=0; i<A.size(); ++i)  D[i][i] = power(D[i][i],modpo);
     if(matrix_power(A, po) == S * D * matrix_inverse(S))    printf("GOOD\n\n");
     else    printf("NOOOOT GOOD....\n\n");
+    po=0;
+}
+inline void func3() {
+    long long i,c1=0,cp_1=0;
+    //vector<long long> a,b;
+    for(i=1; i<=MOD>>1; ++i) {
+        long long k = power(i,(MOD-1)>>1);
+        printf("%lld\t%lld\n",i,k);
+        if(k==1)    {
+            //a.push_back(i);
+            c1++;
+        }
+        else    {
+            //b.push_back(i);
+            cp_1++;
+        }
+    }
+    i=0;
+    return;
 }
 
 
@@ -669,6 +771,7 @@ int main()
     //MOD = 100000007;
     MOD = 101;
     Initiation();
+    //func1();
     vector<vector<long long>> A = {
 //        {3,5,7,2},
 //        {1,4,7,2},
@@ -696,46 +799,52 @@ int main()
         {95, 8,46,53,32},
         {34,100,50,80,70}
         
+//        {28,102,100,11,37},
+//        {101,101,71,31,47},
+//        { 5, 97,  6,63,13},
+//        {58, 82, 72,84,82},
+//        {86, 91, 21,50, 1}
+        
         
 //        {1,0,0,0},
 //        {0,0,0,0},
 //        {0,0,2,0},
 //        {0,0,0,3}
-    },S,D,V,U,E,S2,D2;
-    //vector<vector<long long>> I;
+    },S,D,S1,D1,M1,M2,M3;
+    vector<vector<long long>> E = {
+        {1,0,0,0,0},
+        {0,9,0,0,0},
+        {0,0,19,0,0},
+        {0,0,0,6685,0},
+        {0,0,0,0,2347823}
+    };
+    vector<vector<long long>> MT = A*E*matrix_inverse(A);
     
     int i,j,k;
+        
+    //func1();
     
-    //matrix_diagonalize(A, S, D, false);
+//    for(i=1; i<MOD; ++i)
+//        if(power(2,i)==100) {
+//            printf("%d ",i);
+//        }
+//    printf("\n\n");
+//    for(i=1; i<MOD; ++i)
+//        if(power(i,5)==17) {
+//            printf("%d ",i);
+//        }
+//    printf("\n\n");
+//    for(i=1; i<=MOD>>1; ++i)
+//        printf("%d\t",power(i,3));
+//    printf("\n\n");
+//    for(; i<MOD; ++i)
+//        printf("%d\t",power(i,3));
     
+    //matrix_print(MT);
+    matrix_diagonalize_fast(A, S, D, false);
+    matrix_print(D);    matrix_print(S);    matrix_print(S*D*matrix_inverse(S));
+    printf("\n\n");
     matrix_diagonalize(A, S, D, false);
-    matrix_print(S);    matrix_print(D);
-    matrix_print(matrix_power(D, 50));
-    //matrix_print(S * matrix_power(D, (MOD-1)>>1) * matrix_inverse(S));
-    
-    vector<vector<long long>> A50 = matrix_power(A, (MOD-1)>>1);
-//    matrix_print(A50);
-    matrix_diagonalize(A50, S2, D2, false);
-    matrix_print(S2);    matrix_print(D2);
-    
-//    vector<vector<long long>> P = {
-//        {0,0,1,0,0},
-//        {0,0,0,1,0},
-//        {1,0,0,0,0},
-//        {0,1,0,0,0},
-//        {0,0,0,0,1}
-//    };
-//    S2 = S2 * P;    D2 = D2 * P;
-//    matrix_print(S2 * D2 * matrix_inverse(S2));
-    
-    vector<vector<long long>> TV1 = matrix_transpose(S);
-    vector<vector<long long>> TV2 = matrix_transpose(S2);
-    //for(i=0; i<2; ++i)  TV2.pop_back();
-    //TV1 = matrix_transpose(TV1);
-    for(i=0; i<5; ++i) {
-        vector_print(Ax_b(S2, TV1[i]));
-    }
-    for(i=0; i<5; ++i) {
-        vector_print(Ax_b(S, TV2[i]));
-    }
+    matrix_print(D);    matrix_print(S);    matrix_print(S*D*matrix_inverse(S));
+
 }
