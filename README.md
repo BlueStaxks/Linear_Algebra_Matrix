@@ -65,7 +65,9 @@ change_of_basis_P()      // This function uses 2 basis and make change-of-basis 
 
 Vector's multiplication and Matrix_vector multiplication are also defined.
 
-
+--------------------------
+------------------------
+---------------------------
 
 
 # Galois_Field_Matrix
