@@ -1,3 +1,7 @@
+#include <iostream>
+#include <fstream>
+#include <time.h>
+
 #include <set>
 #include <vector>
 #include <iostream>
@@ -6,6 +10,7 @@ using namespace std;
 long long MOD = 10e9; //should be inside of INT32 range. It's GF so MOD must be a prime.
 long long primitive;
 vector<int> int_inverse;
+vector<int> seeds; // primitive ^ seeds[i] = i
 vector<long long> MOD_decompose;
 vector<vector<int>> ones_roots;
 inline long long inverse(long long a) {
@@ -84,17 +89,18 @@ void Initiation() {
                 break;
             }
         if(P) {
-            primitive=i; //find smalleset primitive root
+            primitive=i; //find smallest primitive root
             break;
         }
     }
-//    ones_roots.resize(MOD);
-//    for(int i=1; i<MOD; ++i)
-//        for(int j=0; j<MOD_di.size(); ++j)
-//            if(power(i,MOD_di[j])==1) {
-//                ones_roots[MOD_di[j]].push_back(i); //calculate order of all numbers
-//                break;
-//            }
+    seeds.resize(MOD);
+    for(long long i=1,t=primitive; i<MOD; ++i,t=t*primitive%MOD)
+        seeds[t]=(int)i;  //primitive ^ seeds[i] = i
+    ones_roots.resize(MOD);
+    for(int i=1; i<MOD; ++i)
+        for(int j=0; j<MOD_di.size()-1; ++j) // 1^(1/i) = ones_roots.front() ~ back()
+            if(power(i,MOD_di[j])==1)
+                ones_roots[MOD_di[j]].push_back(i); //calculate order of all numbers
 }
 
 template <typename T>
@@ -628,7 +634,7 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
         printf("Invertible matrix only for now\n\n");
         exit(1);
     }
-    int i,j,k,l,n=(int)A.size(), vc=0, powC=((int)MOD-1), c=0;
+    int i,j,k,l,n=(int)A.size(), vc=0, powC=(int)MOD-1, c=0;
     vector<vector<long long>> ZN;
     S.resize(n,vector<long long>(n,0));
     D.resize(n,vector<long long>(n,0));
@@ -645,30 +651,38 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
         for(j=0; j<roots.size() && vc<n; ++j) {
             long long rank = matrix_rank( matrix_power(A, powC) - roots[j]*I );
             vc+=n-rank;
-            if(rank!=n) prev_roots.push_back(roots[j]);
+            if(rank!=n) prev_roots.push_back(roots[j]); //filter
         }
         roots.clear();
-        for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part
-            for(k=1,c=0; k<MOD && c<MOD_decompose[i]; ++k)
-                if(power(k,MOD_decompose[i])==prev_roots[j]) {
-                    roots.push_back(k);
-                    c++;
-                }
-//            long long seed=-1;
-//            if(prev_roots[j]==1) //often happens
-//                seed=(MOD-1) * inverse(MOD_decompose[i])%MOD;
-//            else
-//                for(k=1; k<MOD; ++k)
-//                    if(power(primitive,k)==prev_roots[j]) {
-//                        seed=k * inverse(MOD_decompose[i])%MOD;
-//                        break;
-//                    }
-//            long long seed2 = power(primitive,seed);
-//            for(k=1; k<=i; ++k)
-//                for(l=0; l<ones_roots[MOD_decompose[k]].size(); ++l)
-//                    roots.push_back(seed2 * ones_roots[MOD_decompose[k]][l] % MOD);
+        for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part (was)
+            long long seed = seeds[prev_roots[j]] * inverse(MOD_decompose[i]) % MOD;
+            long long seed2 = power(primitive,seed);
+            for(l=0; l<ones_roots[MOD_decompose[i]].size(); ++l)
+                roots.push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
         }
     }
+    
+//    vector<long long> prev_roots;
+//    vector<long long> roots;
+//    for(i=0; i<ones_roots[MOD_decompose.back()].size(); ++i)
+//        roots.push_back(ones_roots[MOD_decompose.back()][i]);
+//    for(i=(int)MOD_decompose.size()-2; i>=0; --i,vc=0) {
+//        prev_roots.clear();
+//        powC/=MOD_decompose[i+1];
+//        for(j=0; j<roots.size() && vc<n; ++j) {
+//            long long rank = matrix_rank( matrix_power(A, powC) - roots[j]*I );
+//            vc+=n-rank;
+//            if(rank!=n) prev_roots.push_back(roots[j]);
+//        }
+//        roots.clear();
+//        for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part (was)
+//            long long seed = seeds[prev_roots[j]] * inverse(MOD_decompose[i]) % MOD;
+//            long long seed2 = power(primitive,seed);
+//            for(l=0; l<ones_roots[MOD_decompose[i]].size(); ++l)
+//                roots.push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
+//        }
+//    }
+    
     long long trace = 0;
     for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
     //sort(roots.begin(), roots.end());
@@ -696,7 +710,7 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
     return;
 }
 inline void func1() {
-    int N=8,c=0,i,j,k;
+    int N=1000,c=0,i,j,k;
     vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
     for(i=0; i<N; ++i)  I[i][i]=1;
     for(int trial=1; trial<1000000000; ++trial) {
@@ -719,7 +733,7 @@ inline void func1() {
         c++;
         printf("%d / %d\t\t%lf%%\n",c,trial,100*c/(double)trial);
         //matrix_diagonalize(tm, S1, D1, false);
-        matrix_diagonalize(tm, S2, D2, false);
+        matrix_diagonalize_fast(tm, S2, D2, false);
         if(tm * S2 != S2 * D2 || matrix_determinant(S2)==0) {
             printf("NOT GOOD...\n\n");
             matrix_print(tm);
@@ -764,14 +778,55 @@ inline void func3() {
     i=0;
     return;
 }
-
+inline void func4() {
+    int N=10,c=0,i,j,k;
+    vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
+    for(i=0; i<N; ++i)  I[i][i]=1;
+    for(int trial=1; trial<1000000000; ++trial) {
+        vector<vector<long long>> tm = I;
+        for(i=0; i<N-1; ++i) {
+            for(j=i+1; j<N; ++j) {
+                long long mul = rand()%MOD;
+                for(k=0; k<N; ++k)
+                    tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+            }
+        }
+        for(i=N-1; i>0; --i) {
+            for(j=i-1; j>=0; --j) {
+                long long mul = rand()%MOD;
+                for(k=0; k<N; ++k)
+                    tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+            }
+        }
+        vector<vector<long long>> E(N, vector<long long>(N,0));
+        for(i=0; i<N; ++i)  E[i][i] = rand()%(MOD-1)+1;
+        vector<vector<long long>> DC = tm * E * matrix_inverse(tm);
+        clock_t s1,f1,s2,f2;
+        s1=clock();
+        matrix_diagonalize(DC, S1, D1, false);
+        f1=clock();
+        s2=clock();
+        matrix_diagonalize_fast(DC, S2, D2, false);
+        f2=clock();
+        if(DC * S2 != S2 * D2 || matrix_determinant(S2)==0) {
+            printf("NOT GOOD...\n\n");
+            matrix_print(DC);
+            matrix_print(S2 * D2 * matrix_inverse(S2));
+            matrix_print(D2);
+            exit(1);
+        }
+        double d1=(double)(f1-s1)/CLOCKS_PER_SEC, d2=(double)(f2-s2)/CLOCKS_PER_SEC;
+        printf("-- %d\t\t%lf sec vs %lf sec.\t%lf time faster!!\n",trial,d1,d2,d1/d2);
+        //matrix_print(tm);
+    }
+}
 
 int main()
 {
-    //MOD = 100000007;
-    MOD = 101;
+    MOD = 100000007;
+    //MOD = 10007;
     Initiation();
-    //func1();
+    func4();
     vector<vector<long long>> A = {
 //        {3,5,7,2},
 //        {1,4,7,2},
@@ -792,6 +847,10 @@ int main()
 //        {1,0,0,0},
 //        {0,1,0,0},
 //        {0,0,1,0}
+        
+//        {1,2,0},
+//        {2,3,4},
+//        {3,6,1}
     
         {63,63, 0,48,13},
         {48, 5,89,65,57},
@@ -817,10 +876,14 @@ int main()
         {0,0,19,0,0},
         {0,0,0,6685,0},
         {0,0,0,0,2347823}
+        
+//        {1,0,0},
+//        {0,4,0},
+//        {0,0,6}
     };
     vector<vector<long long>> MT = A*E*matrix_inverse(A);
     
-    int i,j,k;
+    //int i,j,k;
         
     //func1();
     
@@ -840,11 +903,11 @@ int main()
 //    for(; i<MOD; ++i)
 //        printf("%d\t",power(i,3));
     
-    //matrix_print(MT);
-    matrix_diagonalize_fast(A, S, D, false);
-    matrix_print(D);    matrix_print(S);    matrix_print(S*D*matrix_inverse(S));
+    matrix_print(MT);
+    matrix_diagonalize_fast(MT, S, D, false);
+    matrix_print(D);    matrix_print(S);//    matrix_print(S*D*matrix_inverse(S));
     printf("\n\n");
-    matrix_diagonalize(A, S, D, false);
+    matrix_diagonalize(MT, S, D, false);
     matrix_print(D);    matrix_print(S);    matrix_print(S*D*matrix_inverse(S));
-
+    return 0;
 }
