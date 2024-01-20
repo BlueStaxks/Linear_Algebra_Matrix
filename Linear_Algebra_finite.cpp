@@ -638,41 +638,25 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
     vector<vector<long long>> ZN;
     S.resize(n,vector<long long>(n,0));
     D.resize(n,vector<long long>(n,0));
-    vector<vector<long long>> I=I_n(n);
+    vector<vector<long long>> I=I_n(n), PM;
     if (matrix_power(A, MOD-1) != I) {
         printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
         exit(1);
     }
-    vector<long long> prev_roots={1};
-    vector<long long> roots={1,MOD-1};
-    for(i=1; i<MOD_decompose.size(); ++i,vc=0) {
-        prev_roots.clear();
-        powC/=MOD_decompose[i-1];
-        for(j=0; j<roots.size() && vc<n; ++j) {
-            long long rank = matrix_rank( matrix_power(A, powC) - roots[j]*I );
-            vc+=n-rank;
-            if(rank!=n) prev_roots.push_back(roots[j]); //filter
-        }
-        roots.clear();
-        for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part (was)
-            long long seed = seeds[prev_roots[j]] * inverse(MOD_decompose[i]) % MOD;
-            long long seed2 = power(primitive,seed);
-            for(l=0; l<ones_roots[MOD_decompose[i]].size(); ++l)
-                roots.push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
-        }
-    }
-    
 //    vector<long long> prev_roots;
-//    vector<long long> roots;
-//    for(i=0; i<ones_roots[MOD_decompose.back()].size(); ++i)
-//        roots.push_back(ones_roots[MOD_decompose.back()][i]);
-//    for(i=(int)MOD_decompose.size()-2; i>=0; --i,vc=0) {
-//        prev_roots.clear();
-//        powC/=MOD_decompose[i+1];
+//    vector<long long> roots={1,MOD-1};
+//    //vector<int> eigen_count;
+//    for(i=1; i<MOD_decompose.size(); ++i,vc=0) {
+//        prev_roots.clear(); eigen_count.clear();
+//        powC/=MOD_decompose[i-1];
+//        PM = matrix_power(A, powC);
 //        for(j=0; j<roots.size() && vc<n; ++j) {
-//            long long rank = matrix_rank( matrix_power(A, powC) - roots[j]*I );
-//            vc+=n-rank;
-//            if(rank!=n) prev_roots.push_back(roots[j]);
+//            long long rank = matrix_rank( PM - roots[j]*I );
+//            if(rank!=n) {
+//                vc+=n-rank;
+//                prev_roots.push_back(roots[j]); //filter
+//                //eigen_count.push_back((int)n-(int)rank);
+//            }
 //        }
 //        roots.clear();
 //        for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part (was)
@@ -682,6 +666,31 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
 //                roots.push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
 //        }
 //    }
+    
+    vector<long long> prev_roots;
+    vector<long long> roots;
+    vector<long long> eigen_count;
+    for(i=0; i<ones_roots[MOD_decompose.back()].size(); ++i)
+        roots.push_back(ones_roots[MOD_decompose.back()][i]);
+    for(i=(int)MOD_decompose.size()-2; i>=0; --i,vc=0) {
+        prev_roots.clear(); eigen_count.clear();
+        powC/=MOD_decompose[i+1];
+        for(j=0; j<roots.size() && vc<n; ++j) {
+            long long rank = matrix_rank( matrix_power(A, powC) - roots[j]*I );
+            if(rank!=n) {
+                vc+=n-rank;
+                prev_roots.push_back(roots[j]);
+                eigen_count.push_back(n-rank);
+            }
+        }
+        roots.clear();
+        for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part (was)
+            long long seed = seeds[prev_roots[j]] * inverse(MOD_decompose[i]) % MOD;
+            long long seed2 = power(primitive,seed);
+            for(l=0; l<ones_roots[MOD_decompose[i]].size(); ++l)
+                roots.push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
+        }
+    }
     
     long long trace = 0;
     for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
@@ -779,7 +788,7 @@ inline void func3() {
     return;
 }
 inline void func4() {
-    int N=10,c=0,i,j,k;
+    int N=3,c=0,i,j,k;
     vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
     for(i=0; i<N; ++i)  I[i][i]=1;
     for(int trial=1; trial<1000000000; ++trial) {
@@ -824,7 +833,7 @@ inline void func4() {
 int main()
 {
     MOD = 100000007;
-    //MOD = 10007;
+    //MOD = 101;
     Initiation();
     func4();
     vector<vector<long long>> A = {
