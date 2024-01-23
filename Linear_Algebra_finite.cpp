@@ -254,6 +254,11 @@ inline vector<vector<long long>> I_n(int n) {
     for (int i = 0; i < n; ++i)  I[i][i] = 1;
     return I;
 }
+inline vector<vector<long long>> I_n(int n, long long a) {
+    vector<vector<long long>> I(n, vector<long long>(n,0));
+    for (int i = 0; i < n; ++i)  I[i][i] = a;
+    return I;
+}
 inline vector<vector<long long>> matrix_transpose(const vector<vector<long long>> &a) {
     vector<vector<long long>> R(a.front().size(), vector<long long>(a.size()));
     int i, j;
@@ -634,12 +639,12 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
         printf("Invertible matrix only for now\n\n");
         exit(1);
     }
-    int i,j,k,l,n=(int)A.size(), vc=0, powC=(int)MOD-1, c=0;
+    int i,j,k,l,n=(int)A.size(), vc=0, powC=(int)MOD-1, vct;
     vector<vector<long long>> ZN;
     S.resize(n,vector<long long>(n,0));
     D.resize(n,vector<long long>(n,0));
-    vector<vector<long long>> I=I_n(n), PM;
-    if (matrix_power(A, MOD-1) != I) {
+    vector<vector<long long>> PM;
+    if (matrix_power(A, MOD-1) != I_n(n)) {
         printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
         exit(1);
     }
@@ -668,58 +673,64 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
 //    }
     
     vector<long long> prev_roots;
-    vector<long long> roots;
-    vector<long long> eigen_count;
+    vector<vector<long long>> roots(1,vector<long long>());
+    vector<long long> eigen_count(1,n), ect;
     for(i=0; i<ones_roots[MOD_decompose.back()].size(); ++i)
-        roots.push_back(ones_roots[MOD_decompose.back()][i]);
-    for(i=(int)MOD_decompose.size()-2; i>=0; --i,vc=0) {
-        prev_roots.clear(); eigen_count.clear();
+        roots[0].push_back(ones_roots[MOD_decompose.back()][i]);
+    for(i=(int)MOD_decompose.size()-2; i>=0; --i,vc=0,prev_roots.clear(),ect.clear()) {
         powC/=MOD_decompose[i+1];
-        for(j=0; j<roots.size() && vc<n; ++j) {
-            long long rank = matrix_rank( matrix_power(A, powC) - roots[j]*I );
-            if(rank!=n) {
-                vc+=n-rank;
-                prev_roots.push_back(roots[j]);
-                eigen_count.push_back(n-rank);
+        PM = matrix_power(A, powC);
+        for(k=0; k<roots.size(); ++k) {
+            for(j=vc=0; j<roots[k].size() && vc<eigen_count[k]; ++j) {
+                long long rank = matrix_rank( PM - I_n(n,roots[k][j]) ); // test
+                if(rank!=n) {
+                    vc+=n-rank;
+                    prev_roots.push_back(roots[k][j]);
+                    ect.push_back(n-rank);
+                }
             }
         }
         roots.clear();
+        roots.resize(prev_roots.size(), vector<long long>());
+        eigen_count=ect;
         for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part (was)
             long long seed = seeds[prev_roots[j]] * inverse(MOD_decompose[i]) % MOD;
             long long seed2 = power(primitive,seed);
             for(l=0; l<ones_roots[MOD_decompose[i]].size(); ++l)
-                roots.push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
+                roots[j].push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
         }
     }
     
     long long trace = 0;
     for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
-    //sort(roots.begin(), roots.end());
-    for(i=0,vc=0; i<roots.size(); ++i) { //eigenvalue zero to MOD-1
-        ZN = Null_Space(A - roots[i]*I, Orth);
-        if(!ZN.empty()) { // det(A - eigenvalue*I) == 0    <-- eigenvalue found
-            for(k=0; k<ZN[0].size(); ++k)   D[k+vc][k+vc]=roots[i];
-            for(k=0; k<ZN.size(); ++k)
-                for(l=0; l<ZN[0].size(); ++l)
-                    S[k][l+vc]=ZN[k][l];
-            vc+=(int)ZN[0].size();
-            //printf(" -- total %d eigenvalues found. --> %d\n",vc,i);
-            if(vc==n-1) { // only one more to go
-                long long EigSum = 0;
-                for(k=0; k<n-1; ++k)    EigSum = (EigSum + D[k][k]) % MOD;
-                D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
-                //printf(" -- last eigenvalue found. --> %lld\n\n\n",D[n-1][n-1]);
-                ZN = Null_Space(A - D[n-1][n-1]*I, Orth);
-                for(k=0; k<ZN.size(); ++k)  S[k][vc]=ZN[k][0];
-                return;
+    for(k=vc=0; k<roots.size(); ++k) {
+        for(j=vct=0; j<2 && vct<eigen_count[k]; ++j) {   //roots[?].size() == 2
+            ZN = Null_Space(A - I_n(n,roots[k][j]), Orth);
+            if(!ZN.empty()) {
+                for(i=0; i<ZN[0].size(); ++i) {
+                    D[i+vc][i+vc]=roots[k][j];
+                    for(l=0; l<ZN.size(); ++l)
+                        S[l][i+vc]=ZN[l][i];
+                }
+                vc+=(int)ZN[0].size();
+                vct+=(int)ZN[0].size();
+                if(vc==n-1) {
+                    long long EigSum = 0;
+                    for(i=0; i<n-1; ++i)    EigSum = (EigSum + D[i][i]) % MOD;
+                    D[n-1][n-1] = (trace - EigSum + MOD) % MOD;
+                    //printf(" -- last eigenvalue found. --> %lld\n\n\n",D[n-1][n-1]);
+                    ZN = Null_Space(A - I_n(n,D[n-1][n-1]), Orth);
+                    for(i=0; i<ZN.size(); ++i)  S[i][vc]=ZN[i][0];
+                    return;
+                }
             }
-            if(vc==n)   return; //maximum n eigenvectors.
         }
     }
     return;
 }
 inline void func1() {
-    int N=1000,c=0,i,j,k;
+    int N=100,i,j,k;
+    double avt=0;
     vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
     for(i=0; i<N; ++i)  I[i][i]=1;
     for(int trial=1; trial<1000000000; ++trial) {
@@ -738,19 +749,25 @@ inline void func1() {
                     tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
             }
         }
-        if(matrix_power(tm, MOD-1)!=I)  continue;
-        c++;
-        printf("%d / %d\t\t%lf%%\n",c,trial,100*c/(double)trial);
-        //matrix_diagonalize(tm, S1, D1, false);
-        matrix_diagonalize_fast(tm, S2, D2, false);
-        if(tm * S2 != S2 * D2 || matrix_determinant(S2)==0) {
+        vector<vector<long long>> E(N, vector<long long>(N,0));
+        for(i=0; i<N; ++i)  E[i][i] = rand()%(MOD-1)+1;
+        vector<vector<long long>> DC = tm * E * matrix_inverse(tm);
+        clock_t s1,f1,s2,f2;
+        s2=clock();
+        matrix_diagonalize_fast(DC, S2, D2, false);
+        f2=clock();
+        if(DC * S2 != S2 * D2 || matrix_determinant(S2)==0) {
             printf("NOT GOOD...\n\n");
-            matrix_print(tm);
+            matrix_print(DC);
+            printf("WRONG : \n");
             matrix_print(S2 * D2 * matrix_inverse(S2));
+            matrix_print(S2);
             matrix_print(D2);
             exit(1);
         }
-        //matrix_print(tm);
+        double d2=(double)(f2-s2)/CLOCKS_PER_SEC;
+        avt+=d2;
+        printf("-- %d\t\t%lf sec.\t\t(avg %lf sec)\n",trial,d2,avt/trial);
     }
 }
 inline void func2() {
@@ -788,7 +805,8 @@ inline void func3() {
     return;
 }
 inline void func4() {
-    int N=3,c=0,i,j,k;
+    int N=4,i,j,k;
+    double avt=0;
     vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
     for(i=0; i<N; ++i)  I[i][i]=1;
     for(int trial=1; trial<1000000000; ++trial) {
@@ -820,12 +838,19 @@ inline void func4() {
         if(DC * S2 != S2 * D2 || matrix_determinant(S2)==0) {
             printf("NOT GOOD...\n\n");
             matrix_print(DC);
+            printf("WRONG : \n");
             matrix_print(S2 * D2 * matrix_inverse(S2));
+            matrix_print(S2);
             matrix_print(D2);
+            printf("\n\n\nRIGHT : \n");
+            matrix_print(S1 * D1 * matrix_inverse(S1));
+            matrix_print(S1);
+            matrix_print(D1);
             exit(1);
         }
         double d1=(double)(f1-s1)/CLOCKS_PER_SEC, d2=(double)(f2-s2)/CLOCKS_PER_SEC;
-        printf("-- %d\t\t%lf sec vs %lf sec.\t%lf time faster!!\n",trial,d1,d2,d1/d2);
+        avt+=d1/d2;
+        printf("-- %d\t\t%lf sec vs %lf sec.\t\t%lf time faster!!\t\t(avg %lf time faster)\n",trial,d1,d2,d1/d2,avt/trial);
         //matrix_print(tm);
     }
 }
@@ -833,45 +858,48 @@ inline void func4() {
 int main()
 {
     MOD = 100000007;
-    //MOD = 101;
+    //MOD = 131071;
+    //MOD = 524287;
+    //MOD = 65537;
+    //MOD = 653659;
     Initiation();
     func4();
     vector<vector<long long>> A = {
-//        {3,5,7,2},
-//        {1,4,7,2},
-//        {6,3,9,17},
-//        {13,5,4,16}
+        //        {3,5,7,2},
+        //        {1,4,7,2},
+        //        {6,3,9,17},
+        //        {13,5,4,16}
         
-//        {1,0,0,0},
-//        {0,2,9,0},
-//        {0,9,3,1},
-//        {0,0,1,4}
+        //        {1,0,0,0},
+        //        {0,2,9,0},
+        //        {0,9,3,1},
+        //        {0,0,1,4}
         
-//        {1,2,3,4},
-//        {2,3,4,5},
-//        {9,4,5,6},
-//        {1,5,2,7}
+        //        {1,2,3,4},
+        //        {2,3,4,5},
+        //        {9,4,5,6},
+        //        {1,5,2,7}
         
-//        {3,5,9,3},
-//        {1,0,0,0},
-//        {0,1,0,0},
-//        {0,0,1,0}
+        //        {3,5,9,3},
+        //        {1,0,0,0},
+        //        {0,1,0,0},
+        //        {0,0,1,0}
         
-//        {1,2,0},
-//        {2,3,4},
-//        {3,6,1}
-    
-        {63,63, 0,48,13},
-        {48, 5,89,65,57},
-        {32,69, 1,57,68},
-        {95, 8,46,53,32},
-        {34,100,50,80,70}
+        //        {1,2,0},
+        //        {2,3,4},
+        //        {3,6,1}
         
-//        {28,102,100,11,37},
-//        {101,101,71,31,47},
-//        { 5, 97,  6,63,13},
-//        {58, 82, 72,84,82},
-//        {86, 91, 21,50, 1}
+//        {63,63, 0,48,13},
+//        {48, 5,89,65,57},
+//        {32,69, 1,57,68},
+//        {95, 8,46,53,32},
+//        {34,100,50,80,70}
+        
+        {{51 ,   78   , 50  ,  8  ,  42},
+            {32 ,   15   , 17   , 68 ,   47},
+            {11  ,  80 ,   77  ,  77   , 94},
+            {11   , 53  ,  36  ,  88   , 12},
+            {65 ,   77   , 8  ,  58   , 31}}
         
         
 //        {1,0,0,0},
@@ -890,7 +918,7 @@ int main()
 //        {0,4,0},
 //        {0,0,6}
     };
-    vector<vector<long long>> MT = A*E*matrix_inverse(A);
+    //vector<vector<long long>> MT = A*E*matrix_inverse(A);
     
     //int i,j,k;
         
@@ -912,11 +940,11 @@ int main()
 //    for(; i<MOD; ++i)
 //        printf("%d\t",power(i,3));
     
-    matrix_print(MT);
-    matrix_diagonalize_fast(MT, S, D, false);
-    matrix_print(D);    matrix_print(S);//    matrix_print(S*D*matrix_inverse(S));
-    printf("\n\n");
-    matrix_diagonalize(MT, S, D, false);
+    //matrix_print(MT);
+    matrix_diagonalize(A, S, D, false);
     matrix_print(D);    matrix_print(S);    matrix_print(S*D*matrix_inverse(S));
+    printf("\n\n");
+    matrix_diagonalize_fast(A, S1, D1, false);
+    matrix_print(D1);    matrix_print(S1);    matrix_print(S1*D1*matrix_inverse(S1));
     return 0;
 }
