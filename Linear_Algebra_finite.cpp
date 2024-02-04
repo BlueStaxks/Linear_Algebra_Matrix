@@ -12,6 +12,7 @@ long long primitive;
 vector<int> int_inverse;
 vector<int> seeds; // primitive ^ seeds[i] = i
 vector<long long> MOD_decompose; 
+vector<long long> MOD_divisors;
 vector<vector<int>> ones_roots; // 1^(1/i) = ones_roots.front() ~ back()
 inline long long inverse(long long a) {
     if(!a) {
@@ -69,7 +70,8 @@ inline vector<long long> decompose(long long a) {
 }
 inline vector<long long> divisor(long long a) {
     vector<long long> r;
-    for(long long i = 1; i <= sqrt(a); ++i)
+    long long sq = sqrt(a);
+    for(long long i = 1; i <= sq; ++i)
         if (a % i == 0) {
             r.push_back(i);
             if (i*i!=a) r.push_back(a / i);
@@ -80,11 +82,12 @@ inline vector<long long> divisor(long long a) {
 void Initiation() {
     int_inverse.resize(MOD,0);
     MOD_decompose = decompose(MOD-1);
-    vector<long long> MOD_di = divisor(MOD-1);
-    for(long long i=2; i<MOD; ++i) {
+    MOD_divisors = divisor(MOD-1);
+    primitive=1;
+    for(int i=2; i<MOD; ++i) {
         bool P=true;
-        for(int j=1; j<MOD_di.size()-1; ++j)
-            if(power(i,MOD_di[j])==1) {
+        for(int j=1; j<MOD_divisors.size()-1; ++j)
+            if(power(i,MOD_divisors[j])==1) {
                 P=false;
                 break;
             }
@@ -94,13 +97,13 @@ void Initiation() {
         }
     }
     seeds.resize(MOD);
-    for(long long i=1,t=primitive; i<MOD; ++i,t=t*primitive%MOD)
-        seeds[t]=(int)i;  //primitive ^ seeds[i] = i
     ones_roots.resize(MOD);
-    for(int i=1; i<MOD; ++i)
-        for(int j=0; j<MOD_di.size()-1; ++j) // 1^(1/i) = ones_roots.front() ~ back()
-            if(power(i,MOD_di[j])==1)
-                ones_roots[MOD_di[j]].push_back(i); //calculate order of all numbers
+    for(long long i=1,t=primitive; i<MOD; ++i, t=t*primitive%MOD) {
+        seeds[t]=(int)i;  //primitive ^ seeds[i] = i
+        for(int j=0; j<MOD_divisors.size()-1; ++j) // 1^(1/i) = ones_roots.front() ~ back()
+            if(power(i,MOD_divisors[j])==1)
+                ones_roots[MOD_divisors[j]].push_back((int)i); //calculate order of all numbers
+    }
 }
 
 template <typename T>
@@ -608,6 +611,42 @@ inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b)
     }
     return r;
 }
+inline void matrix_diagonalize_2x2(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+    S.resize(2,vector<long long>(2,0));
+    D.resize(2,vector<long long>(2,0));
+    long long inroot = ((A[0][0]+A[1][1])*(A[0][0]+A[1][1])%MOD)*inverse(4)%MOD, seed=0,seed2=0;
+    inroot = (inroot + (A[0][1]*A[1][0]) - ((A[0][0]*A[1][1])%MOD) + MOD)%MOD;
+    if(!inroot)
+        D[0][0]=D[1][1]=(A[0][0]+A[1][1])*inverse(2)%MOD;
+    else {
+        seed = seeds[inroot] * inverse(2) % MOD;
+        seed2 = power(primitive,seed);
+        long long fr = (A[0][0]+A[1][1])*inverse(2)%MOD;
+        D[0][0] = (fr + seed2)%MOD;
+        D[1][1] = (fr - seed2 + MOD)%MOD;
+    }
+    if(D[0][0]==D[1][1]) {
+        S = Null_Space(A - I_n(2,D[0][0]), Orth);
+        if(S.empty())
+            exit(1);
+        else if(S[0].size()!=2)
+            exit(1);
+    }
+    else {
+        vector<vector<long long>> ZN = Null_Space(A - I_n(2, D[0][0]), false);
+        if(ZN.empty())
+            exit(1);
+        else if(ZN[0].size()!=1)
+            exit(1);
+        S[0][0]=ZN[0][0];   S[1][0]=ZN[1][0];
+        ZN = Null_Space(A - I_n(2, D[1][1]), false);
+        if(ZN.empty())
+            exit(1);
+        else if(ZN[0].size()!=1)
+            exit(1);
+        S[0][1]=ZN[0][0];   S[1][1]=ZN[1][0];
+    }
+}
 inline void matrix_diagonalize_BF(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     if (A.size() != A.front().size()) {
         printf("Matrix diagonalization Error : Matrix is not square\n\n");
@@ -675,6 +714,10 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
     if (matrix_power(A, MOD-1) != I_n(n)) {
         printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
         exit(1);
+    }
+    if(n==2) {
+        matrix_diagonalize_2x2(A, S, D, Orth);
+        return;
     }
 //    vector<long long> prev_roots;
 //    vector<long long> roots={1,MOD-1};
@@ -756,35 +799,26 @@ inline void matrix_diagonalize_fast(vector<vector<long long>> A, vector<vector<l
     }
     return;
 }
-inline void matrix_diagonalize_fast2(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
-    if (A.size() != A.front().size()) {
-        printf("Matrix diagonalization Error : Matrix is not square\n\n");
-        exit(1);
-    }
-    if (!matrix_determinant(A)) {
-        printf("Invertible matrix only for now\n\n");
-        exit(1);
-    }
-    int i,j,k,l,n=(int)A.size(), vc=0, powC=(int)MOD-1, vct;
+inline void matrix_diagonalize_fast2(vector<vector<long long>>& A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth, long long powC, int pi, long long ev) {
+    int i,j,k,l,n=(int)A.size(), vc=0, vct;
     vector<vector<long long>> ZN;
     S.resize(n,vector<long long>(n,0));
     D.resize(n,vector<long long>(n,0));
     vector<vector<long long>> PM;
-    if(n==1) {
-        S[0][0]=1;  D[0][0]=A[0][0];
+    if(n==2) {
+        matrix_diagonalize_2x2(A, S, D, Orth);
         return;
     }
-    if (matrix_power(A, MOD-1) != I_n(n)) {
-        printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
-        exit(1);
-    }
-    vector<long long> prev_roots;
+    
+    vector<long long> prev_roots; //(ev)
     vector<vector<long long>> roots(1,vector<long long>());
     vector<long long> eigen_count(1,n), ect;
-    for(i=0; i<ones_roots[MOD_decompose.back()].size(); ++i)
-        roots[0].push_back(ones_roots[MOD_decompose.back()][i]);
-    for(i=(int)MOD_decompose.size()-2; i>=0; --i,vc=0,prev_roots.clear(),ect.clear()) {
-        powC/=MOD_decompose[i+1];
+    long long seed = seeds[ev] * inverse(MOD_decompose[pi]) % MOD;
+    long long seed2 = power(primitive,seed);
+    for(i=0; i<ones_roots[MOD_decompose[pi]].size(); ++i)
+        roots[0].push_back(seed2 * ones_roots[MOD_decompose[pi]][i] % MOD);
+    for(i=pi+1; i<MOD_decompose.size(); ++i,vc=0,prev_roots.clear(),ect.clear()) {
+        powC/=MOD_decompose[i-1];
         
         PM = matrix_power(A, powC);
         for(k=0; k<roots.size(); ++k) {
@@ -801,9 +835,9 @@ inline void matrix_diagonalize_fast2(vector<vector<long long>> A, vector<vector<
         roots.clear();
         roots.resize(prev_roots.size(), vector<long long>());
         eigen_count=ect;
-        for(j=0; j<prev_roots.size(); ++j) {     //most time consuming part (was)
-            long long seed = seeds[prev_roots[j]] * inverse(MOD_decompose[i]) % MOD;
-            long long seed2 = power(primitive,seed);
+        for(j=0; j<prev_roots.size(); ++j) {     //prev_roots.size() is max n
+            seed = seeds[prev_roots[j]] * inverse(MOD_decompose[i]) % MOD;
+            seed2 = power(primitive,seed);
             for(l=0; l<ones_roots[MOD_decompose[i]].size(); ++l)
                 roots[j].push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
         }
@@ -812,7 +846,7 @@ inline void matrix_diagonalize_fast2(vector<vector<long long>> A, vector<vector<
     long long trace = 0;
     for(i=0; i<n; ++i)  trace = (trace + A[i][i]) % MOD;
     for(k=vc=0; k<roots.size(); ++k) {
-        for(j=vct=0; j<2 && vct<eigen_count[k]; ++j) {   //roots[?].size() == 2
+        for(j=vct=0; j<roots[k].size() && vct<eigen_count[k]; ++j) {
             ZN = Null_Space(A - I_n(n,roots[k][j]), Orth);
             if(!ZN.empty()) {
                 for(i=0; i<ZN[0].size(); ++i) {
@@ -836,42 +870,6 @@ inline void matrix_diagonalize_fast2(vector<vector<long long>> A, vector<vector<
     }
     return;
 }
-inline void matrix_diagonalize_2x2(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
-    S.resize(2,vector<long long>(2,0));
-    D.resize(2,vector<long long>(2,0));
-    long long inroot = ((A[0][0]+A[1][1])*(A[0][0]+A[1][1])%MOD)*inverse(4)%MOD, seed=0,seed2=0;
-    inroot = (inroot + (A[0][1]*A[1][0]) - ((A[0][0]*A[1][1])%MOD) + MOD)%MOD;
-    if(!inroot)
-        D[0][0]=D[1][1]=(A[0][0]+A[1][1])*inverse(2)%MOD;
-    else {
-        seed = seeds[inroot] * inverse(2) % MOD;
-        seed2 = power(primitive,seed);
-        long long fr = (A[0][0]+A[1][1])*inverse(2)%MOD;
-        D[0][0] = (fr + seed2)%MOD;
-        D[1][1] = (fr - seed2 + MOD)%MOD;
-    }
-    if(D[0][0]==D[1][1]) {
-        S = Null_Space(A - I_n(2,D[0][0]), Orth);
-        if(S.empty())
-            exit(1);
-        else if(S[0].size()!=2)
-            exit(1);
-    }
-    else {
-        vector<vector<long long>> ZN = Null_Space(A - I_n(2, D[0][0]), false);
-        if(ZN.empty())
-            exit(1);
-        else if(ZN[0].size()!=1)
-            exit(1);
-        S[0][0]=ZN[0][0];   S[1][0]=ZN[1][0];
-        ZN = Null_Space(A - I_n(2, D[1][1]), false);
-        if(ZN.empty())
-            exit(1);
-        else if(ZN[0].size()!=1)
-            exit(1);
-        S[0][1]=ZN[0][0];   S[1][1]=ZN[1][0];
-    }
-}
 inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     if (A.size() != A.front().size()) {
         printf("Matrix diagonalization Error : Matrix is not square\n\n");
@@ -890,29 +888,44 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
         exit(1);
     }
     vector<vector<vector<long long>>> M;    M.push_back(A);
-    for(int pi=0,stp=0; pi<(MOD_decompose.size()+1)>>1; ++pi,stp=0) {
+    vector<long long> FE(1,1);
+    long long powC=MOD-1;
+    int pi=0;
+    for(int stp=0; pi<MOD_decompose.size()>>1; ++pi,stp=0) {
     //for(int pi=0,stp=0; pi<5; ++pi,stp=0) {
         int matiu = (int)M.size();
+        powC/=MOD_decompose[pi];
         vector<vector<long long>> ST(n, vector<long long>(n,0));
         for(; mati<matiu; ++mati,vc=0) {
             if(M[mati].size()==1) {
                 M.push_back(M[mati]);
+                FE.push_back(M[mati][0][0]);
                 ST[stp][stp]=1;
                 stp++;
                 continue;
             }
             vector<vector<long long>> St(M[mati].size(), vector<long long>(M[mati].size()));
-            vector<vector<long long>> PM = matrix_power(M[mati], (MOD-1)/MOD_decompose[pi]);
+            vector<vector<long long>> PM = matrix_power(M[mati], powC);
             vector<int> esc;
-            for(i=0; i<ones_roots[MOD_decompose[pi]].size() && vc<M[mati].size(); ++i) { //create S
-                ZN = Null_Space(PM - I_n((int)M[mati].size(),ones_roots[MOD_decompose[pi]][i]), Orth);
+            
+            long long seed = seeds[FE[mati]] * inverse(MOD_decompose[pi]) % MOD;
+            long long seed2 = power(primitive,seed);
+            for(i=0; i<ones_roots[MOD_decompose[pi]].size(); ++i) {
+                //roots[j].push_back(seed2 * ones_roots[MOD_decompose[i]][l] % MOD);  // in MOD_decompose, there is no p-1. max is (p-1)/2
+            //for(i=0; i<ones_roots[(MOD-1)/powC].size() && vc<M[mati].size(); ++i) { //create S
+                //ZN = Null_Space(PM - I_n((int)M[mati].size(),ones_roots[(MOD-1)/powC][i]), Orth);
+                ZN = Null_Space(PM - I_n((int)M[mati].size(), seed2 * ones_roots[MOD_decompose[pi]][i] % MOD), Orth);
                 if(ZN.empty())  continue;
                 esc.push_back((int)ZN[0].size());
+                //FE.push_back(ones_roots[(MOD-1)/powC][i]);
+                FE.push_back(seed2 * ones_roots[MOD_decompose[pi]][i] % MOD);
                 for(j=0; j<ZN.size(); ++j)
                     for(k=0; k<ZN[0].size(); ++k)
                         St[j][k+vc]=ZN[j][k];
                 vc+=(int)ZN[0].size();
             }
+            
+            
             vector<vector<long long>> mt = matrix_inverse(St) * M[mati] * St;
             for(i=0; i<St.size(); ++i)
                 for(j=0; j<St.size(); ++j)
@@ -931,6 +944,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
             continue;
         }
         vector<vector<long long>> St,Dt;
+        //matrix_diagonalize_fast2(M[mati], St, Dt, Orth, powC,pi,FE[mati]);
         matrix_diagonalize_fast(M[mati], St, Dt, Orth);
         ST = ST|St;
         D = D|Dt;
@@ -1015,7 +1029,7 @@ inline void func3() {
     return;
 }
 inline void func4() {
-    int N=2,i,j,k;
+    int N=20,i,j,k;
     double avt=0;
     vector<vector<long long>> I,S1,D1,S2,D2;
     I=I_n(N);
@@ -1040,22 +1054,22 @@ inline void func4() {
         vector<vector<long long>> DC = tm * E * matrix_inverse(tm);
         clock_t s1,f1,s2,f2;
         s1=clock();
-        matrix_diagonalize_henry(DC, S1, D1, false);
+        matrix_diagonalize_fast(DC, S1, D1, false);
         f1=clock();
         s2=clock();
-        matrix_diagonalize_2x2(DC, S2, D2, false);
+        matrix_diagonalize_henry(DC, S2, D2, false);
         f2=clock();
         if(DC * S2 != S2 * D2 || matrix_determinant(S2)==0) {
             printf("NOT GOOD...\n\n");
             matrix_print(DC);
-            printf("WRONG : \n");
-            matrix_print(S2 * D2 * matrix_inverse(S2));
-            matrix_print(S2);
-            matrix_print(D2);
-            printf("\n\n\nRIGHT : \n");
-            matrix_print(S1 * D1 * matrix_inverse(S1));
+            printf("RIGHT : \n");
             matrix_print(S1);
             matrix_print(D1);
+            matrix_print(S1 * D1 * matrix_inverse(S1));
+            printf("\n\n\nWRONG : \n");
+            matrix_print(S2);
+            matrix_print(D2);
+            matrix_print(S2 * D2 * matrix_inverse(S2));
             exit(1);
         }
         double d1=(double)(f1-s1)/CLOCKS_PER_SEC, d2=(double)(f2-s2)/CLOCKS_PER_SEC;
@@ -1100,17 +1114,23 @@ int main()
         //        {2,3,4},
         //        {3,6,1}
         
-        {63,63, 0,48,13},
-        {48, 5,89,65,57},
-        {32,69, 1,57,68},
-        {95, 8,46,53,32},
-        {34,100,50,80,70}
+//        {63,63, 0,48,13},
+//        {48, 5,89,65,57},
+//        {32,69, 1,57,68},
+//        {95, 8,46,53,32},
+//        {34,100,50,80,70}
         
 //        {{51 ,   78   , 50  ,  8  ,  42},
 //            {32 ,   15   , 17   , 68 ,   47},
 //            {11  ,  80 ,   77  ,  77   , 94},
 //            {11   , 53  ,  36  ,  88   , 12},
 //            {65 ,   77   , 8  ,  58   , 31}}
+        
+        {{98   , 50  ,  4 ,   80 ,   51},
+            {   27  ,  68 ,   96   , 84  ,  82},
+            {64  ,  57  ,  20  ,  9  ,  48},
+            {     0   , 40  ,  10  ,  34   , 5},
+            { 23   , 73   , 80   , 43   , 80}}
         
         
 //        {1,0,0,0},
@@ -1133,8 +1153,7 @@ int main()
     
     //matrix_print(MT);
     matrix_diagonalize_fast(A, S, D, false);
-    matrix_print(D);    matrix_print(S);    matrix_print(S*D*matrix_inverse(S));
-    printf("\n\n");
+    //matrix_print(D);    matrix_print(S);    matrix_print(S*D*matrix_inverse(S));  printf("\n\n");
     matrix_diagonalize_henry(A, S1, D1, false);
     matrix_print(D1);    matrix_print(S1);    matrix_print(S1*D1*matrix_inverse(S1));
     return 0;
