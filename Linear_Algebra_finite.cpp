@@ -1029,7 +1029,7 @@ inline void func3() {
     return;
 }
 inline void func4() {
-    int N=20,i,j,k;
+    int N=50,i,j,k;
     double avt=0;
     vector<vector<long long>> I,S1,D1,S2,D2;
     I=I_n(N);
@@ -1081,12 +1081,12 @@ inline void func4() {
 
 int main()
 {
-    MOD = 100000007;
+    //MOD = 100000007;
     //MOD = 131071;
     //MOD = 524287;
     //MOD = 65537;
     //MOD = 653659;
-    //MOD = 101;
+    MOD = 101;
     Initiation();
     func4();
     vector<vector<long long>> A = {
