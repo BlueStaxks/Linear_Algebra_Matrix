@@ -1,8 +1,6 @@
-#include <iostream>
 #include <fstream>
 #include <time.h>
 
-#include <set>
 #include <vector>
 #include <iostream>
 #include <algorithm>
@@ -82,13 +80,13 @@ inline vector<long long> divisor(long long a) {
 void Initiation() {
     int_inverse.resize(MOD,0);
     
-    ifstream MODfile;
-    string name = to_string(MOD);
-    name+=".txt";
-    MODfile.open(name);
-    if(MODfile.is_open()) {
-        
-    }
+//    ifstream MODfile;
+//    string name = to_string(MOD);
+//    name+=".txt";
+//    MODfile.open(name);
+//    if(MODfile.is_open()) {
+//        
+//    }
     
     MOD_decompose = decompose(MOD-1);
     MOD_divisors = divisor(MOD-1);
@@ -978,7 +976,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
         exit(1);
     }
     vector<vector<vector<long long>>> M;    M.push_back(A);
-    vector<long long> FE(1,1);
+    vector<long long> FE(1,1); //eigenvalues of M[i]^something
     long long powC=MOD-1;
     int pi=0;
     for(int stp=0; pi<MOD_decompose.size(); ++pi,stp=0) {
@@ -1021,27 +1019,14 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
     }
     vector<vector<long long>> ST;
     for(; mati<M.size(); ++mati) {
-        if(M[mati].size()==1) {
-            D = D|M[mati];
-            vector<vector<long long>> St(1, vector<long long>(1,1));
-            ST = ST|St;
-            continue;
-        }
-        else {
-            D = D|I_n((int)M[mati].size(), FE[mati]);
-            ST = ST|I_n((int)M[mati].size());
-        }
-//        vector<vector<long long>> St,Dt;
-//        //matrix_diagonalize_fast2(M[mati], St, Dt, Orth, powC,pi,FE[mati]);
-//        matrix_diagonalize_fast(M[mati], St, Dt, Orth);
-//        ST = ST|St;
-//        D = D|Dt;
+        D = D|I_n((int)M[mati].size(), FE[mati]);
+        ST = ST|I_n((int)M[mati].size());
     }
     S = S*ST;
 }
 
 inline void func1() {
-    int N=300,i,j,k;
+    int N=100,i,j,k;
     double avt=0;
     vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
     for(i=0; i<N; ++i)  I[i][i]=1;
@@ -1169,15 +1154,15 @@ inline void func4() {
 
 int main()
 {
-    //MOD = 1000000003;
-    MOD = 100000007;
-    //MOD = 131071;
-    //MOD = 524287;
-    //MOD = 65537;
-    //MOD = 653659;
-    //MOD = 101;
+    //MOD = 1000000007;         //2*500000003         worst distributed
+    //MOD = 100000007;          //2*491*101833
+    //MOD = 131071;             //2*3*5*17*257
+    MOD = 524287;             //2*3*3*3*7*19*73     well distributed
+    //MOD = 65537;              //2^16
+    //MOD = 653659;               //2*3*108943
+    //MOD = 101;                //2*2*5*5
     Initiation();
-    func4();
+    func1();
     vector<vector<long long>> A = {
         //        {3,5,7,2},
         //        {1,4,7,2},
