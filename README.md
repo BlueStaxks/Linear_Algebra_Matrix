@@ -96,7 +96,7 @@ inverse(), power(), gcd(), decompose(), divisior(), Extended_Euclid()
 
 For Matrix : 
 
-==, !=, *, +, -
+==, !=, *, +, -, |(diagonal expansion)
 
 matrix_transpose()
 
