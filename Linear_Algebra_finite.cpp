@@ -964,7 +964,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
         exit(1);
     }
     if (!matrix_determinant(A)) {
-        printf("Invertible matrix only for now\n\n");
+        printf("Invertible matrix only, for now\n\n");
         exit(1);
     }
     int i,j,k,n=(int)A.size(), vc=0, mati=0;
@@ -978,9 +978,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
     vector<vector<vector<long long>>> M;    M.push_back(A);
     vector<long long> FE(1,1); //eigenvalues of M[i]^something
     long long powC=MOD-1;
-    int pi=0;
-    for(int stp=0; pi<MOD_decompose.size(); ++pi,stp=0) {
-    //for(int pi=0,stp=0; pi<5; ++pi,stp=0) {
+    for(int pi=0,stp=0; pi<MOD_decompose.size(); ++pi,stp=0) {
         int matiu = (int)M.size();
         powC/=MOD_decompose[pi];
         vector<vector<long long>> ST(n, vector<long long>(n,0));
@@ -992,41 +990,46 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
                 stp++;
                 continue;
             }
+            if(M[mati].size()==2) {
+                vector<vector<long long>> D2,S2;
+                matrix_diagonalize_2x2(M[mati], S2, D2, Orth);   //diagonalizing 2x2 matrix does not require query, hence, fast
+                M.push_back({{D2[0][0]}});  M.push_back({{D2[1][1]}});
+                FE.push_back(D2[0][0]);     FE.push_back(D2[1][1]);
+                ST[stp][stp] = S2[0][0];    ST[stp][stp+1] = S2[0][1];  ST[stp+1][stp] = S2[1][0];  ST[stp+1][stp+1] = S2[1][1];
+                stp+=2;
+                continue;
+            }
             vector<vector<long long>> St(M[mati].size(), vector<long long>(M[mati].size()));
             vector<vector<long long>> PM = matrix_power(M[mati], powC);
             vector<int> esc;
             long long seed = seeds[FE[mati]] * inverse(MOD_decompose[pi]) % MOD;
             long long seed2 = power(primitive,seed);
-            for(i=0; i<ones_roots[MOD_decompose[pi]].size(); ++i) {
-                ZN = Null_Space(PM - I_n((int)M[mati].size(), seed2 * ones_roots[MOD_decompose[pi]][i] % MOD), Orth);
+            for(i=0; i<ones_roots[MOD_decompose[pi]].size() && vc<M[mati].size(); ++i) {
+                long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;
+                ZN = Null_Space(PM - I_n((int)M[mati].size(), candidate), Orth);
                 if(ZN.empty())  continue;
                 esc.push_back((int)ZN[0].size());
-                //FE.push_back(ones_roots[(MOD-1)/powC][i]);
-                FE.push_back(seed2 * ones_roots[MOD_decompose[pi]][i] % MOD);
+                FE.push_back(candidate);
                 for(j=0; j<ZN.size(); ++j)
                     for(k=0; k<ZN[0].size(); ++k)
-                        St[j][k+vc]=ZN[j][k];
+                        St[j][k+vc]=ZN[j][k];     //copying NullSpace to St
                 vc+=(int)ZN[0].size();
             }
-            vector<vector<long long>> mt = matrix_inverse(St) * M[mati] * St;
+            vector<vector<long long>> mt = matrix_inverse(St) * M[mati] * St;    //seperating eigenspace
             for(i=0; i<St.size(); ++i)
                 for(j=0; j<St.size(); ++j)
-                    ST[i+stp][j+stp]=St[i][j];
+                    ST[i+stp][j+stp]=St[i][j];    //copying several fraction Ss to one n*n S
             stp+=St.size();
-            matrix_chop(M, mt, esc);
+            matrix_chop(M, mt, esc);   //queuing seperated matrix
         }
         S = S*ST;
     }
-    vector<vector<long long>> ST;
-    for(; mati<M.size(); ++mati) {
+    for(; mati<M.size(); ++mati)
         D = D|I_n((int)M[mati].size(), FE[mati]);
-        ST = ST|I_n((int)M[mati].size());
-    }
-    S = S*ST;
 }
 
 inline void func1() {
-    int N=100,i,j,k;
+    int N=300,i,j,k;
     double avt=0;
     vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
     for(i=0; i<N; ++i)  I[i][i]=1;
@@ -1155,9 +1158,9 @@ inline void func4() {
 int main()
 {
     //MOD = 1000000007;         //2*500000003         worst distributed
-    //MOD = 100000007;          //2*491*101833
+    MOD = 100000007;          //2*491*101833
     //MOD = 131071;             //2*3*5*17*257
-    MOD = 524287;             //2*3*3*3*7*19*73     well distributed
+    //MOD = 524287;             //2*3*3*3*7*19*73     well distributed
     //MOD = 65537;              //2^16
     //MOD = 653659;               //2*3*108943
     //MOD = 101;                //2*2*5*5
