@@ -1029,7 +1029,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
 }
 
 inline void func1() {
-    int N=300,i,j,k;
+    int N=700,i,j,k;
     double avt=0;
     vector<vector<long long>> I(N,vector<long long>(N,0)),S1,D1,S2,D2;
     for(i=0; i<N; ++i)  I[i][i]=1;
@@ -1158,14 +1158,14 @@ inline void func4() {
 int main()
 {
     //MOD = 1000000007;         //2*500000003         worst distributed
-    MOD = 100000007;          //2*491*101833
+    //MOD = 100000007;          //2*491*101833
     //MOD = 131071;             //2*3*5*17*257
-    //MOD = 524287;             //2*3*3*3*7*19*73     well distributed
+    MOD = 524287;             //2*3*3*3*7*19*73     well distributed
     //MOD = 65537;              //2^16
     //MOD = 653659;               //2*3*108943
     //MOD = 101;                //2*2*5*5
     Initiation();
-    func1();
+    func4();
     vector<vector<long long>> A = {
         //        {3,5,7,2},
         //        {1,4,7,2},
