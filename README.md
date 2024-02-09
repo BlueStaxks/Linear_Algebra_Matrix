@@ -96,7 +96,7 @@ inverse(), power(), gcd(), decompose(), divisior(), Extended_Euclid()
 
 For Matrix : 
 
-==, !=, *, +, -
+==, !=, *, +, -, |(diagonal expansion)
 
 matrix_transpose()
 
@@ -110,11 +110,13 @@ matrix_determinant()
 
 Null_Space()
 
-Ax=b()                   // This function finds x. if there is more than one solution, this function will return particular solution.
+Ax=b()                     // This function finds x. if there is more than one solution, this function will return particular solution.
 
-matrix_diagonalize()     // This function do brute force way to find all eigenvalues.
+matrix_diagonalize_BF()    // This function do brute force way to find all eigenvalues. Trying 1 to p-1.
 
-matrix_diagonalize_fast()// This function do faster way to diagonalize. see document about Galois Field Matrix in this repository. (The document is not yet fully written)
+matrix_diagonalize_fast()  // This function is a faster diagonalize function. check the document about Galois Field Matrix in this repository. (The document is not yet fully written)
+
+matrix_diagonalize_henry() // This is the fasteset way I found to diagonalize. check the document for mathmatical detail. 
 
 ---------------------
 
