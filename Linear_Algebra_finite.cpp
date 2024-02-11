@@ -1043,9 +1043,9 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
                     ST[i + stp][j + stp] = St[i][j];    //copying Sts to one n*n S
             stp += St.size();
             matrix_chop(M, mt, eigspace_dim);     //chop mt by eigspace_dim and put them into M. It's like queuing.
+            eigspace_dim.clear();
         }
         S = S * ST; //update S
-        eigspace_dim.clear();
     }
     for (int Di = 0; mat_i < M.size(); ++mat_i)
         for (i = 0; i < M[mat_i].size(); ++i, ++Di)
@@ -1129,7 +1129,7 @@ inline void func3() {
     return;
 }
 inline void func4() {
-    int N = 5, i, j, k;
+    int N = 20, i, j, k;
     double avt = 0;
     vector<vector<long long>> I, S1, D1, S2, D2;
     I = I_n(N);
@@ -1183,11 +1183,11 @@ int main()
 {
     //MOD = 1000000007;         //2*500000003         worst distributed
     //MOD = 100000007;          //2*491*101833
-    //MOD = 131071;             //2*3*5*17*257
+    MOD = 131071;             //2*3*5*17*257
     //MOD = 524287;             //2*3*3*3*7*19*73     well distributed
     //MOD = 65537;              //2^16
     //MOD = 653659;               //2*3*108943
-    MOD = 101;                //2*2*5*5
+    //MOD = 101;                //2*2*5*5
     Initiation();
     func4();
     vector<vector<long long>> A = {
