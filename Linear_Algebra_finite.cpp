@@ -312,6 +312,28 @@ inline void matrix_chop(vector<vector<vector<long long>>>& M, vector<vector<long
         p+=list[i];
     }
 }
+inline vector<vector<long long>> matrix_partial_multiply(vector<vector<long long>>& A, vector<vector<long long>>& B, vector<int> list) {
+    vector<vector<long long>> R(A.size(), vector<long long>(A.size(),0));
+    int i,j,l,k,n=(int)A.size(),p=0;
+    for(i=0; i<n; ++i) {
+        for(j=0; j<list.size(); ++j)
+        {
+            for(l=p; l<p+list[j]; ++l)
+                for(k=0; k<list[j]; ++k)
+                    R[i][l] = (R[i][l] + A[i][p+k] * B[k+p][l]) % MOD;
+        }
+        
+        
+//        for(j=0; j<p; ++j)
+//            R[i][j] = A[i][j];
+//        for(j=p; j<p+B.size(); ++j)
+//            for(k=0; k<B.size(); ++k)
+//                R[i][j] = (R[i][j] + A[i][p+k] * B[k][j-p]) % MOD;
+//        for(j=p+(int)B.size(); j<n; ++j)
+//            R[i][j] = A[i][j];
+    }
+    return R;
+}
 inline long long matrix_rank(vector<vector<long long>> A) {
     int m = (int)A.size(), n = (int)A[0].size();
     int i,j,k,l,p=0;
@@ -967,65 +989,73 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
         printf("Invertible matrix only, for now\n\n");
         exit(1);
     }
-    int i,j,k,n=(int)A.size(), vc=0, mati=0;
+    int i,j,k,n=(int)A.size(), eigvec_count=0, mat_i=0;
     vector<vector<long long>> ZN;
     S = I_n(n);
-    D.clear();
+    D.clear();  D.resize(n,vector<long long>(n,0));
     if (matrix_power(A, MOD-1) != I_n(n)) {
         printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
         exit(1);
     }
-    vector<vector<vector<long long>>> M;    M.push_back(A);
-    vector<long long> FE(1,1); //eigenvalues of M[i]^something
+    vector<vector<vector<long long>>> M;    M.push_back(A); //M works like a queue of matrix. mat_i is iterator of M.
+    vector<long long> FE(1,1); //eigenvalues of M[mat_i]^something
     long long powC=MOD-1;
     for(int pi=0,stp=0; pi<MOD_decompose.size(); ++pi,stp=0) {
-        int matiu = (int)M.size();
+        int mati_upperbound = (int)M.size();
+        vector<int> eigspace_dim;
         powC/=MOD_decompose[pi];
         vector<vector<long long>> ST(n, vector<long long>(n,0));
-        for(; mati<matiu; ++mati,vc=0) {
-            if(M[mati].size()==1) {
-                M.push_back(M[mati]);
-                FE.push_back(M[mati][0][0]);
+        for(; mat_i<mati_upperbound; ++mat_i,eigvec_count=0) {
+            if(M[mat_i].size()==1) {  //separation is done
+                M.push_back(M[mat_i]);
+                FE.push_back(M[mat_i][0][0]);
                 ST[stp][stp]=1;
                 stp++;
                 continue;
             }
-            if(M[mati].size()==2) {
+            if(M[mat_i].size()==2) {  //2 by 2 matrix does not require query to be diagonalized. it can be done by a formular.
                 vector<vector<long long>> D2,S2;
-                matrix_diagonalize_2x2(M[mati], S2, D2, Orth);   //diagonalizing 2x2 matrix does not require query, hence, fast
+                matrix_diagonalize_2x2(M[mat_i], S2, D2, Orth);
                 M.push_back({{D2[0][0]}});  M.push_back({{D2[1][1]}});
                 FE.push_back(D2[0][0]);     FE.push_back(D2[1][1]);
                 ST[stp][stp] = S2[0][0];    ST[stp][stp+1] = S2[0][1];  ST[stp+1][stp] = S2[1][0];  ST[stp+1][stp+1] = S2[1][1];
+                //matrix_partial_multiply(S, S2, stp);
                 stp+=2;
                 continue;
             }
-            vector<vector<long long>> St(M[mati].size(), vector<long long>(M[mati].size()));
-            vector<vector<long long>> PM = matrix_power(M[mati], powC);
-            vector<int> esc;
-            long long seed = seeds[FE[mati]] * inverse(MOD_decompose[pi]) % MOD;
+            vector<vector<long long>> St(M[mat_i].size(), vector<long long>(M[mat_i].size()));  //eigenvectors set of a M[mat_i]
+            vector<vector<long long>> PM = matrix_power(M[mat_i], powC);
+            long long seed = seeds[FE[mat_i]] * inverse(MOD_decompose[pi]) % MOD;
             long long seed2 = power(primitive,seed);
-            for(i=0; i<ones_roots[MOD_decompose[pi]].size() && vc<M[mati].size(); ++i) {
-                long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;
-                ZN = Null_Space(PM - I_n((int)M[mati].size(), candidate), Orth);
-                if(ZN.empty())  continue;
-                esc.push_back((int)ZN[0].size());
+            for(i=0; i<ones_roots[MOD_decompose[pi]].size() && eigvec_count<M[mat_i].size(); ++i) {
+                long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;  //seeds are used for FE[mat_i]'s MOD_decompose[pi]th roots.
+                vector<vector<long long>> query = PM;
+                for(j=0; j<query.size(); ++j)
+                    query[j][j] = (query[j][j] + MOD - candidate) % MOD;   //PM - candidate*I
+                ZN = Null_Space(query, Orth);  //quering with candidates of PM's eigenvalues.
+                if(ZN.empty())  continue;  //if a candidate is not a eigenvalue, continue.
+                eigspace_dim.push_back((int)ZN[0].size());
                 FE.push_back(candidate);
                 for(j=0; j<ZN.size(); ++j)
                     for(k=0; k<ZN[0].size(); ++k)
-                        St[j][k+vc]=ZN[j][k];     //copying NullSpace to St
-                vc+=(int)ZN[0].size();
+                        St[j][k+eigvec_count]=ZN[j][k];     //copying NullSpace to St
+                eigvec_count+=(int)ZN[0].size();   //if eigvec_count reaches M[mati]'s size, we can stop quering early.
             }
-            vector<vector<long long>> mt = matrix_inverse(St) * M[mati] * St;    //seperating eigenspace
+            vector<vector<long long>> mt = matrix_inverse(St) * M[mat_i] * St;    //seperating eigenspace
             for(i=0; i<St.size(); ++i)
                 for(j=0; j<St.size(); ++j)
-                    ST[i+stp][j+stp]=St[i][j];    //copying several fraction Ss to one n*n S
+                    ST[i+stp][j+stp]=St[i][j];    //copying Sts to one n*n S
+            //S = matrix_partial_multiply(S, St, stp);
             stp+=St.size();
-            matrix_chop(M, mt, esc);   //queuing seperated matrix
+            matrix_chop(M, mt, eigspace_dim);     //chop mt by eigspace_dim and put them into M. It's like queuing.
         }
-        S = S*ST;
+        //S = S*ST; //update S
+        S = matrix_partial_multiply(S, ST, eigspace_dim);
+        eigspace_dim.clear();
     }
-    for(; mati<M.size(); ++mati)
-        D = D|I_n((int)M[mati].size(), FE[mati]);
+    for(int Di=0; mat_i<M.size(); ++mat_i)
+        for(i=0; i<M[mat_i].size(); ++i,++Di)
+            D[Di][Di] = FE[mat_i];   //at last step, each M[mati] has only one eigenvalue(FE[mat_i]) regardless of the M[mat_i]'s size.
 }
 
 inline void func1() {
@@ -1105,7 +1135,7 @@ inline void func3() {
     return;
 }
 inline void func4() {
-    int N=100,i,j,k;
+    int N=5,i,j,k;
     double avt=0;
     vector<vector<long long>> I,S1,D1,S2,D2;
     I=I_n(N);
@@ -1160,10 +1190,10 @@ int main()
     //MOD = 1000000007;         //2*500000003         worst distributed
     //MOD = 100000007;          //2*491*101833
     //MOD = 131071;             //2*3*5*17*257
-    MOD = 524287;             //2*3*3*3*7*19*73     well distributed
+    //MOD = 524287;             //2*3*3*3*7*19*73     well distributed
     //MOD = 65537;              //2^16
     //MOD = 653659;               //2*3*108943
-    //MOD = 101;                //2*2*5*5
+    MOD = 101;                //2*2*5*5
     Initiation();
     func4();
     vector<vector<long long>> A = {
@@ -1177,10 +1207,10 @@ int main()
         //        {0,9,3,1},
         //        {0,0,1,4}
         
-        //        {1,2,3,4},
-        //        {2,3,4,5},
-        //        {9,4,5,6},
-        //        {1,5,2,7}
+                {1,2,3,4},
+                {2,3,4,5},
+                {9,4,5,6},
+                {1,5,2,7}
         
         //        {3,5,9,3},
         //        {1,0,0,0},
@@ -1203,11 +1233,11 @@ int main()
 //            {11   , 53  ,  36  ,  88   , 12},
 //            {65 ,   77   , 8  ,  58   , 31}}
         
-        {{98   , 50  ,  4 ,   80 ,   51},
-            {   27  ,  68 ,   96   , 84  ,  82},
-            {64  ,  57  ,  20  ,  9  ,  48},
-            {     0   , 40  ,  10  ,  34   , 5},
-            { 23   , 73   , 80   , 43   , 80}}
+//        {{98   , 50  ,  4 ,   80 ,   51},
+//            {   27  ,  68 ,   96   , 84  ,  82},
+//            {64  ,  57  ,  20  ,  9  ,  48},
+//            {     0   , 40  ,  10  ,  34   , 5},
+//            { 23   , 73   , 80   , 43   , 80}}
         
         
 //        {1,0,0,0},
@@ -1226,6 +1256,22 @@ int main()
 //        {0,4,0},
 //        {0,0,6}
     };
+    
+    vector<vector<long long>> K = {
+        {1,0,0,0},
+        {0,1,2,0},
+        {0,3,4,0},
+        {0,0,0,1}
+    };
+    vector<vector<long long>> K2 = {
+        {1,2},
+        {3,4}
+    };
+    
+//    matrix_print(A * K);
+//    //vector<vector<long long>> R1 = matrix_partial_multiply(A, K2, 1);
+//    matrix_print(R1);
+//    
     //vector<vector<long long>> MT = A*E*matrix_inverse(A);
     
     //matrix_print(MT);
