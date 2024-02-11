@@ -315,22 +315,12 @@ inline void matrix_chop(vector<vector<vector<long long>>>& M, vector<vector<long
 inline vector<vector<long long>> matrix_partial_multiply(vector<vector<long long>>& A, vector<vector<long long>>& B, vector<int> list) {
     vector<vector<long long>> R(A.size(), vector<long long>(A.size(),0));
     int i,j,l,k,n=(int)A.size(),p=0;
-    for(i=0; i<n; ++i) {
-        for(j=0; j<list.size(); ++j)
-        {
-            for(l=p; l<p+list[j]; ++l)
-                for(k=0; k<list[j]; ++k)
-                    R[i][l] = (R[i][l] + A[i][p+k] * B[k+p][l]) % MOD;
-        }
-        
-        
-//        for(j=0; j<p; ++j)
-//            R[i][j] = A[i][j];
-//        for(j=p; j<p+B.size(); ++j)
-//            for(k=0; k<B.size(); ++k)
-//                R[i][j] = (R[i][j] + A[i][p+k] * B[k][j-p]) % MOD;
-//        for(j=p+(int)B.size(); j<n; ++j)
-//            R[i][j] = A[i][j];
+    for(i=0; i<list.size(); ++i) {
+        for(j=0; j<n; ++j)
+            for(l=p; l<p+list[i]; ++l)
+                for(k=0; k<list[i]; ++k)
+                    R[j][l] = (R[j][l] + A[j][p+k] * B[p+k][l]) % MOD;
+        p+=list[i];
     }
     return R;
 }
@@ -1048,7 +1038,6 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
             matrix_chop(M, mt, eigspace_dim);     //chop mt by eigspace_dim and put them into M. It's like queuing.
         }
         S = S*ST; //update S
-        //S = matrix_partial_multiply(S, ST, eigspace_dim);
         eigspace_dim.clear();
     }
     for(int Di=0; mat_i<M.size(); ++mat_i)
@@ -1259,23 +1248,14 @@ int main()
         {1,0,0,0},
         {0,1,2,0},
         {0,3,4,0},
-        {0,0,0,1}
+        {0,0,0,2}
     };
-    vector<vector<long long>> K2 = {
-        {1,2},
-        {3,4}
-    };
+    vector<int> F = {1,2,1};
     
-//    matrix_print(A * K);
-//    //vector<vector<long long>> R1 = matrix_partial_multiply(A, K2, 1);
-//    matrix_print(R1);
-//    
-    //vector<vector<long long>> MT = A*E*matrix_inverse(A);
+    matrix_print(A * K);
+    vector<vector<long long>> R1 = matrix_partial_multiply(A, K, F);
+    matrix_print(R1);
+
     
-    //matrix_print(MT);
-    matrix_diagonalize_fast(A, S, D, false);
-    //matrix_print(D);    matrix_print(S);    matrix_print(S*D*matrix_inverse(S));  printf("\n\n");
-    matrix_diagonalize_mix(A, S1, D1, false);
-    matrix_print(D1);    matrix_print(S1);    matrix_print(S1*D1*matrix_inverse(S1));
     return 0;
 }
