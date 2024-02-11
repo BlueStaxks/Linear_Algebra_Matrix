@@ -1019,7 +1019,6 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
                 M.push_back({{D2[0][0]}});  M.push_back({{D2[1][1]}});
                 FE.push_back(D2[0][0]);     FE.push_back(D2[1][1]);
                 ST[stp][stp] = S2[0][0];    ST[stp][stp+1] = S2[0][1];  ST[stp+1][stp] = S2[1][0];  ST[stp+1][stp+1] = S2[1][1];
-                //matrix_partial_multiply(S, S2, stp);
                 stp+=2;
                 continue;
             }
@@ -1045,12 +1044,11 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
             for(i=0; i<St.size(); ++i)
                 for(j=0; j<St.size(); ++j)
                     ST[i+stp][j+stp]=St[i][j];    //copying Sts to one n*n S
-            //S = matrix_partial_multiply(S, St, stp);
             stp+=St.size();
             matrix_chop(M, mt, eigspace_dim);     //chop mt by eigspace_dim and put them into M. It's like queuing.
         }
-        //S = S*ST; //update S
-        S = matrix_partial_multiply(S, ST, eigspace_dim);
+        S = S*ST; //update S
+        //S = matrix_partial_multiply(S, ST, eigspace_dim);
         eigspace_dim.clear();
     }
     for(int Di=0; mat_i<M.size(); ++mat_i)
