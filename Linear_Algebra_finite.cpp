@@ -1,6 +1,7 @@
 #include <fstream>
 #include <time.h>
 
+#include <math.h>
 #include <vector>
 #include <iostream>
 #include <algorithm>
@@ -85,7 +86,7 @@ void Initiation() {
     //    name+=".txt";
     //    MODfile.open(name);
     //    if(MODfile.is_open()) {
-    //        
+    //
     //    }
 
     MOD_decompose = decompose(MOD - 1);
@@ -465,7 +466,7 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A, bool Or
                     P = false;
                     break;
                 }
-            if (!P)  
+            if (!P)
                 continue;
             p++;
             continue;
@@ -477,7 +478,7 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A, bool Or
         for (j = i; j < n; ++j)  A[i - 1 - p][j] = (A[i - 1 - p][j] * inverse(temp)) % MOD;
         for (j = i - p; j < m; ++j) {
             long long mul = MOD - A[j][i - 1];
-            if (mul == 0)  
+            if (mul == 0)
                 continue;
             for (k = i - 1; k < n; ++k)
                 A[j][k] = (A[j][k] + A[i - 1 - p][k] * mul) % MOD;
@@ -502,7 +503,7 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A, bool Or
                 P = true;
                 break;
             }
-        if (P)   
+        if (P)
             break;
         A.pop_back();
     }
@@ -530,7 +531,7 @@ inline vector<vector<long long>> Null_Space(vector<vector<long long>> A, bool Or
     for (i = (int)exc.size() - 1; i >= 0; --i)
         for (j = 0; j < N.front().size(); ++j)
             N[exc[i].first][j] ^= N[exc[i].second][j] ^= N[exc[i].first][j] ^= N[exc[i].second][j];
-    if (!Orth)   
+    if (!Orth)
         return N;
     vector<vector<long long>> X = matrix_transpose(N);  //G-S process
     vector<vector<long long>> V = X;
@@ -977,23 +978,37 @@ inline void matrix_diagonalize_mix(vector<vector<long long>> A, vector<vector<lo
     S = S * ST;
 }
 inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
-    if (A.size() != A.front().size()) {
-        printf("Matrix diagonalization Error : Matrix is not square\n\n");
-        exit(1);
-    }
-    if (!matrix_determinant(A)) {
-        printf("Invertible matrix only, for now\n\n");
-        exit(1);
-    }
     int i, j, k, n = (int)A.size(), eigvec_count = 0, mat_i = 0;
-    vector<vector<long long>> ZN;
-    S = I_n(n);
+    vector<vector<long long>> AP_1 = matrix_power(A,MOD-1);
+    S.resize(n, vector<long long>(n,0));
     D.clear();  D.resize(n, vector<long long>(n, 0));
-    if (matrix_power(A, MOD - 1) != I_n(n)) {
-        printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
-        exit(1);
+    vector<vector<long long>> ZN = Null_Space(AP_1 - I_n(n), Orth);
+    if(!ZN.empty()) {
+        for (j = 0; j < ZN.size(); ++j)
+            for (k = 0; k < ZN[0].size(); ++k)
+                S[j][k] = ZN[j][k];
+        eigvec_count = (int)ZN[0].size();
     }
-    vector<vector<vector<long long>>> M;    M.push_back(A); //M works like a queue of matrix. mat_i is iterator of M.
+    ZN = Null_Space(AP_1, Orth);
+    if(!ZN.empty())
+        for (j = 0; j < ZN.size(); ++j)
+            for (k = 0; k < ZN[0].size(); ++k)
+                S[j][k + eigvec_count] = ZN[j][k];
+    vector<vector<long long>> A2 = matrix_inverse(S) * A * S;
+    vector<vector<long long>> New_A(eigvec_count, vector<long long>(eigvec_count));
+    for(j=0; j<eigvec_count; ++j) {
+        for(k=0; k<eigvec_count; ++k) {
+            New_A[j][k] = A2[j][k];
+        }
+    }
+    n = eigvec_count;
+    eigvec_count = 0;
+    vector<vector<long long>> Ss = I_n(n);
+    // if (matrix_power(New_A, MOD - 1) != I_n(n)) {
+    //     printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
+    //     exit(1);
+    // }
+    vector<vector<vector<long long>>> M;    M.push_back(New_A); //M works like a queue of matrix. mat_i is iterator of M.
     vector<long long> FE(1, 1); //eigenvalues of M[mat_i]^something
     long long powC = MOD - 1;
     for (int pi = 0, stp = 0; pi < MOD_decompose.size(); ++pi, stp = 0) {
@@ -1028,7 +1043,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
                 for (j = 0; j < query.size(); ++j)
                     query[j][j] = (query[j][j] + MOD - candidate) % MOD;   //PM - candidate*I
                 ZN = Null_Space(query, Orth);  //quering with candidates of PM's eigenvalues.
-                if (ZN.empty())  
+                if (ZN.empty())
                     continue;  //if a candidate is not a eigenvalue, continue.
                 eigspace_dim.push_back((int)ZN[0].size());
                 FE.push_back(candidate);
@@ -1045,15 +1060,114 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
             matrix_chop(M, mt, eigspace_dim);     //chop mt by eigspace_dim and put them into M. It's like queuing.
             eigspace_dim.clear();
         }
-        S = S * ST; //update S
+        Ss = Ss * ST; //update S
     }
     for (int Di = 0; mat_i < M.size(); ++mat_i)
         for (i = 0; i < M[mat_i].size(); ++i, ++Di)
             D[Di][Di] = FE[mat_i];   //at last step, each M[mati] has only one eigenvalue(FE[mat_i]) regardless of the M[mat_i]'s size.
+    vector<vector<long long>> St = I_n((int)S.size());
+    for(i=0; i<Ss.size(); ++i) {
+        for(j=0; j<Ss.size(); ++j) {
+            St[i][j] = Ss[i][j];
+        }
+    }
+    S=S*St;
+}
+inline void matrix_diagonalize_henry_optimized(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+    int i, j, k, n = (int)A.size(), eigvec_count = 0, mat_i = 0;
+    vector<vector<long long>> AP_1 = matrix_power(A,MOD-1);
+    S.resize(n, vector<long long>(n,0));
+    D.clear();  D.resize(n, vector<long long>(n, 0));
+    vector<vector<long long>> ZN = Null_Space(AP_1 - I_n(n), Orth);
+    if(!ZN.empty()) {
+        for (j = 0; j < ZN.size(); ++j)
+            for (k = 0; k < ZN[0].size(); ++k)
+                S[j][k] = ZN[j][k];
+        eigvec_count = (int)ZN[0].size();
+    }
+    ZN = Null_Space(AP_1, Orth);
+    if(!ZN.empty())
+        for (j = 0; j < ZN.size(); ++j)
+            for (k = 0; k < ZN[0].size(); ++k)
+                S[j][k + eigvec_count] = ZN[j][k];
+    vector<vector<long long>> A2 = matrix_inverse(S) * A * S;
+    vector<vector<long long>> New_A(eigvec_count, vector<long long>(eigvec_count));  //New_A is invertible matrix. if New_A = A, A was invertible₩
+    for(j=0; j<eigvec_count; ++j) {
+        for(k=0; k<eigvec_count; ++k) {
+            New_A[j][k] = A2[j][k];
+        }
+    }
+    n = eigvec_count;
+    eigvec_count = 0;
+    vector<vector<long long>> Ss = I_n(n);
+    vector<vector<vector<long long>>> M;    M.push_back(New_A); //M works like a queue of matrix. mat_i is iterator of M.
+    vector<long long> FE(1, 1); //eigenvalues of M[mat_i]^something
+    long long powC = MOD - 1;
+    for (int pi = 0, stp = 0; pi < MOD_decompose.size(); ++pi, stp = 0) {
+        int mati_upperbound = (int)M.size();
+        vector<int> eigspace_dim;
+        powC /= MOD_decompose[pi];
+        vector<vector<long long>> ST(n, vector<long long>(n, 0));
+        for (; mat_i < mati_upperbound; ++mat_i, eigvec_count = 0) {
+            if (M[mat_i].size() == 1) {  //separation is done
+                M.push_back(M[mat_i]);
+                FE.push_back(M[mat_i][0][0]);
+                ST[stp][stp] = 1;
+                stp++;
+                continue;
+            }
+            if (M[mat_i].size() == 2) {  //2 by 2 matrix does not require query to be diagonalized. it can be done by a formular.
+                vector<vector<long long>> D2, S2;
+                matrix_diagonalize_2x2(M[mat_i], S2, D2, Orth);
+                M.push_back({ {D2[0][0]} });  M.push_back({ {D2[1][1]} });
+                FE.push_back(D2[0][0]);     FE.push_back(D2[1][1]);
+                ST[stp][stp] = S2[0][0];    ST[stp][stp + 1] = S2[0][1];  ST[stp + 1][stp] = S2[1][0];  ST[stp + 1][stp + 1] = S2[1][1];
+                stp += 2;
+                continue;
+            }
+            vector<vector<long long>> St(M[mat_i].size(), vector<long long>(M[mat_i].size()));  //eigenvectors set of a M[mat_i]
+            vector<vector<long long>> PM = matrix_power(M[mat_i], powC);
+            long long seed = seeds[FE[mat_i]] * inverse(MOD_decompose[pi]) % MOD;
+            long long seed2 = power(primitive, seed);
+            for (i = 0; i < ones_roots[MOD_decompose[pi]].size() && eigvec_count < M[mat_i].size(); ++i) {
+                long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;  //seeds are used for FE[mat_i]'s MOD_decompose[pi]th roots.
+                vector<vector<long long>> query = PM;
+                for (j = 0; j < query.size(); ++j)
+                    query[j][j] = (query[j][j] + MOD - candidate) % MOD;   //PM - candidate*I
+                ZN = Null_Space(query, Orth);  //quering with candidates of PM's eigenvalues.
+                if (ZN.empty())
+                    continue;  //if a candidate is not a eigenvalue, continue.
+                eigspace_dim.push_back((int)ZN[0].size());
+                FE.push_back(candidate);
+                for (j = 0; j < ZN.size(); ++j)
+                    for (k = 0; k < ZN[0].size(); ++k)
+                        St[j][k + eigvec_count] = ZN[j][k];     //copying NullSpace to St
+                eigvec_count += (int)ZN[0].size();   //if eigvec_count reaches M[mati]'s size, we can stop quering early.
+            }
+            vector<vector<long long>> mt = matrix_inverse(St) * M[mat_i] * St;    //seperating eigenspace
+            for (i = 0; i < St.size(); ++i)
+                for (j = 0; j < St.size(); ++j)
+                    ST[i + stp][j + stp] = St[i][j];    //copying Sts to one n*n S
+            stp += St.size();
+            matrix_chop(M, mt, eigspace_dim);     //chop mt by eigspace_dim and put them into M. It's like queuing.
+            eigspace_dim.clear();
+        }
+        Ss = Ss * ST; //update S
+    }
+    for (int Di = 0; mat_i < M.size(); ++mat_i)
+        for (i = 0; i < M[mat_i].size(); ++i, ++Di)
+            D[Di][Di] = FE[mat_i];   //at last step, each M[mati] has only one eigenvalue(FE[mat_i]) regardless of the M[mat_i]'s size.
+    vector<vector<long long>> St = I_n((int)S.size());
+    for(i=0; i<Ss.size(); ++i) {
+        for(j=0; j<Ss.size(); ++j) {
+            St[i][j] = Ss[i][j];
+        }
+    }
+    S=S*St;
 }
 
 inline void func1() {
-    int N = 700, i, j, k;
+    int N = 100, i, j, k;
     double avt = 0;
     vector<vector<long long>> I(N, vector<long long>(N, 0)), S1, D1, S2, D2;
     for (i = 0; i < N; ++i)  I[i][i] = 1;
@@ -1074,11 +1188,11 @@ inline void func1() {
             }
         }
         vector<vector<long long>> E(N, vector<long long>(N, 0));
-        for (i = 0; i < N; ++i)  E[i][i] = rand() % (MOD - 1) + 1;
+        for (i = 0; i < N; ++i)  E[i][i] = rand() % MOD;
         vector<vector<long long>> DC = tm * E * matrix_inverse(tm);
         clock_t s2, f2;
         s2 = clock();
-        matrix_diagonalize_henry(DC, S2, D2, false);
+        matrix_diagonalize_henry_optimized(DC, S2, D2, false);
         f2 = clock();
         if (DC * S2 != S2 * D2 || matrix_determinant(S2) == 0) {
             printf("NOT GOOD...\n\n");
@@ -1129,7 +1243,7 @@ inline void func3() {
     return;
 }
 inline void func4() {
-    int N = 20, i, j, k;
+    int N = 30  , i, j, k;
     double avt = 0;
     vector<vector<long long>> I, S1, D1, S2, D2;
     I = I_n(N);
@@ -1150,14 +1264,14 @@ inline void func4() {
             }
         }
         vector<vector<long long>> E(N, vector<long long>(N, 0));
-        for (i = 0; i < N; ++i)  E[i][i] = rand() % (MOD - 1) + 1;
+        for (i = 0; i < N; ++i)  E[i][i] = rand() % MOD;
         vector<vector<long long>> DC = tm * E * matrix_inverse(tm);
         clock_t s1, f1, s2, f2;
         s1 = clock();
-        matrix_diagonalize_fast(DC, S1, D1, false);
+        matrix_diagonalize_BF(DC, S1, D1, false);
         f1 = clock();
         s2 = clock();
-        matrix_diagonalize_henry(DC, S2, D2, false);
+        matrix_diagonalize_henry_optimized(DC, S2, D2, false);
         f2 = clock();
         if (DC * S2 != S2 * D2 || matrix_determinant(S2) == 0) {
             printf("NOT GOOD...\n\n");
@@ -1201,10 +1315,10 @@ int main()
         //        {0,9,3,1},
         //        {0,0,1,4}
 
-                {1,2,3,4},
-                {2,3,4,5},
-                {9,4,5,6},
-                {1,5,2,7}
+                // {1,2,3,4},
+                // {2,3,4,5},
+                // {9,4,5,6},
+                // {1,5,2,7}
 
                 //        {3,5,9,3},
                 //        {1,0,0,0},
@@ -1215,11 +1329,11 @@ int main()
                 //        {2,3,4},
                 //        {3,6,1}
 
-        //        {63,63, 0,48,13},
-        //        {48, 5,89,65,57},
-        //        {32,69, 1,57,68},
-        //        {95, 8,46,53,32},
-        //        {34,100,50,80,70}
+               {63,63, 0,48,13},
+               {48, 5,89,65,57},
+               {32,69, 1,57,68},
+               {95, 8,46,53,32},
+               {34,100,50,80,70}
 
         //        {{51 ,   78   , 50  ,  8  ,  42},
         //            {32 ,   15   , 17   , 68 ,   47},
@@ -1240,29 +1354,25 @@ int main()
         //        {0,0,0,3}
     }, S, D, S1, D1, M1, M2, M3;
     vector<vector<long long>> E = {
-        {1,0,0,0,0},
-        {0,9,0,0,0},
+        {0,0,0,0,0},
+        {0,0,0,0,0},
         {0,0,19,0,0},
-        {0,0,0,6685,0},
-        {0,0,0,0,2347823}
+        {0,0,0,665,0},
+        {0,0,0,0,2343}
 
         //        {1,0,0},
         //        {0,4,0},
         //        {0,0,6}
     };
 
-    vector<vector<long long>> K = {
-        {1,0,0,0},
-        {0,1,2,0},
-        {0,3,4,0},
-        {0,0,0,2}
-    };
-    vector<int> F = { 1,2,1 };
+    vector<vector<long long>> M = A * E * matrix_inverse(A);
 
-    matrix_print(A * K);
-    vector<vector<long long>> R1 = matrix_partial_multiply(A, K, F);
-    matrix_print(R1);
-
+    //matrix_print(A * K);
+    //vector<vector<long long>> R1 = matrix_partial_multiply(A, K, F);
+    matrix_print(M);
+    matrix_diagonalize_henry_optimized(M,S,D,false);
+    matrix_print(S);    matrix_print(D);
+    matrix_print(S*D*matrix_inverse(S));
 
     return 0;
 }
