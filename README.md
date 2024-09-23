@@ -116,7 +116,7 @@ matrix_diagonalize_BF()    // This function do brute force way to find all eigen
 
 matrix_diagonalize_fast()  // This function is a faster diagonalize function. check the document about Galois Field Matrix in this repository. (The document is not yet fully written)
 
-matrix_diagonalize_henry() // This is the fasteset way I found to diagonalize. check the document for mathmatical detail. 
+matrix_diagonalize_henry() // This is the fasteset way I found to diagonalize. check the document for mathematical detail. 
 
 ---------------------
 
