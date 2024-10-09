@@ -678,10 +678,6 @@ inline void matrix_diagonalize_BF(vector<vector<long long>> A, vector<vector<lon
         printf("Matrix diagonalization Error : Matrix is not square\n\n");
         exit(1);
     }
-    if (!matrix_determinant(A)) {
-        printf("Matrix diagonalization Error : Try Invertible matrix\n\n");
-        exit(1);
-    }
     if (matrix_power(A, MOD - 1) != I_n((int)A.size())) {
         printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
         exit(1);
