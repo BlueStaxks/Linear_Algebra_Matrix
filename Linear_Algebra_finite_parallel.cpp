@@ -891,20 +891,24 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
     D.clear();  D.resize(n, vector<long long>(n, 0));
     vector<vector<long long>> ZN = Null_Space(AP_1 - I_n(n), Orth);
     if(!ZN.empty()) {
+        #pragma omp parallel for private(j,k)
         for (j = 0; j < ZN.size(); ++j)
             for (k = 0; k < ZN[0].size(); ++k)
                 S[j][k] = ZN[j][k];
         eigvec_count = (int)ZN[0].size();
     }
     ZN = Null_Space(AP_1, Orth);
-    if(!ZN.empty())
+    if(!ZN.empty()) {
+        #pragma omp parallel for private(j,k)
         for (j = 0; j < ZN.size(); ++j)
             for (k = 0; k < ZN[0].size(); ++k)
                 S[j][k + eigvec_count] = ZN[j][k];
+    }
     vector<vector<long long>> A2 = matrix_inverse(S) * A * S;
     vector<vector<long long>> New_A(eigvec_count, vector<long long>(eigvec_count));
-    for(j=0; j<eigvec_count; ++j) {
-        for(k=0; k<eigvec_count; ++k) {
+    #pragma omp parallel for private(j,k)
+    for (j = 0; j < eigvec_count; ++j) {
+        for (k = 0; k < eigvec_count; ++k) {
             New_A[j][k] = A2[j][k];
         }
     }
@@ -947,6 +951,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
             for (i = 0; i < ones_roots[MOD_decompose[pi]].size() && eigvec_count < M[mat_i].size(); ++i) {
                 long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;  //seeds are used for FE[mat_i]'s MOD_decompose[pi]th roots.
                 vector<vector<long long>> query = PM;
+                #pragma omp parallel for private(j)
                 for (j = 0; j < query.size(); ++j)
                     query[j][j] = (query[j][j] + MOD - candidate) % MOD;   //PM - candidate*I
                 ZN = Null_Space(query, Orth);  //quering with candidates of PM's eigenvalues.
@@ -954,12 +959,14 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
                     continue;  //if a candidate is not a eigenvalue, continue.
                 eigspace_dim.push_back((int)ZN[0].size());
                 FE.push_back(candidate);
+                #pragma omp parallel for private(j,k)
                 for (j = 0; j < ZN.size(); ++j)
                     for (k = 0; k < ZN[0].size(); ++k)
                         St[j][k + eigvec_count] = ZN[j][k];     //copying NullSpace to St
                 eigvec_count += (int)ZN[0].size();   //if eigvec_count reaches M[mati]'s size, we can stop quering early.
             }
             vector<vector<long long>> mt = matrix_inverse(St) * M[mat_i] * St;    //seperating eigenspace
+            #pragma omp parallel for private(i,j)
             for (i = 0; i < St.size(); ++i)
                 for (j = 0; j < St.size(); ++j)
                     ST[i + stp][j + stp] = St[i][j];    //copying Sts to one n*n S
@@ -973,6 +980,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
         for (i = 0; i < M[mat_i].size(); ++i, ++Di)
             D[Di][Di] = FE[mat_i];   //at last step, each M[mati] has only one eigenvalue(FE[mat_i]) regardless of the M[mat_i]'s size.
     vector<vector<long long>> St = I_n((int)S.size());
+    #pragma omp parallel for private(i,j) collapse(2)
     for(i=0; i<Ss.size(); ++i) {
         for(j=0; j<Ss.size(); ++j) {
             St[i][j] = Ss[i][j];
@@ -1113,20 +1121,6 @@ inline void func4() {
         //matrix_print(tm);
     }
 }
-vector<vector<long long>> matmul(const vector<vector<long long>>& a, const vector<vector<long long>>& b) {
-    int rows = a.size();
-    int inner = a[0].size();  // Also the number of rows in b
-    int cols = b[0].size();
-    vector<vector<long long>> result(rows, vector<long long>(cols, 0));
-    for (int i = 0; i < rows; ++i) {
-        for (int j = 0; j < cols; ++j) {
-            for (int k = 0; k < inner; ++k) {
-                result[i][j] = (result[i][j] + a[i][k] * b[k][j]) % MOD;
-            }
-        }
-    }
-    return result;
-}
 inline void func5() {
     int N = 500;
     double avt = 0;
@@ -1164,10 +1158,6 @@ inline void func5() {
 
         //auto K = matrix_inverse(tm);
 
-        auto K = tm * tm;
-        auto P = matmul(tm, tm);
-        if(!(K==P))
-            printf("???????????????????????????");
 
 
         auto end = chrono::high_resolution_clock::now();
@@ -1186,11 +1176,11 @@ int main()
     //MOD = 65537;              //2^16
     //MOD = 653659;               //2*3*108943
     //MOD = 101;                //2*2*5*5
-    auto start = chrono::high_resolution_clock::now();
+    //auto start = chrono::high_resolution_clock::now();
     Initiation();
-    auto end = chrono::high_resolution_clock::now();
-    chrono::duration<double> elapsed = end - start;
-    printf("%lf sec\n\n", elapsed.count());
+    //auto end = chrono::high_resolution_clock::now();
+    //chrono::duration<double> elapsed = end - start;
+    //printf("%lf sec\n\n", elapsed.count());
     //func5();
     //func4();
     func1();
