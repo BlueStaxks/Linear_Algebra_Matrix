@@ -260,7 +260,7 @@ inline vector<long long> operator - (const vector<long long>& a, const vector<lo
     }
     vector<long long> R(a.size(), 0);
     for (int i = 0; i < a.size(); ++i)
-        R[i] = (a[i] - b[i]) % MOD;
+        R[i] = (a[i] - b[i] + MOD) % MOD;
     return R;
 }
 inline vector<long long> Extended_Euclid(long long a, long long b) {
