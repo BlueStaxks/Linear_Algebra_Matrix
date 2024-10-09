@@ -95,24 +95,17 @@ void Initiation() {
 
     MOD_decompose = decompose(MOD - 1);
     MOD_divisors = divisor(MOD - 1);
-    primitive = 1;
-    bool found = false;
-    long long last = MOD;
-    #pragma omp parallel for schedule(dynamic)
-    for (int i = 2; i < last; ++i) {
+    primitive = 0;
+    for (int i = 2; i < MOD; ++i) {
         bool P = true;
         for (int j = 1; j < MOD_divisors.size() - 1; ++j)
             if (power(i, MOD_divisors[j]) == 1) {
                 P = false;
                 break;
             }
-        if (P && !found) {
-            #pragma omp critical 
-            {
-                primitive = i; //find smallest primitive root
-                found = true;
-                last = 0; //end parallel loops..?
-            }
+        if (P) {
+            primitive = i; //find smallest primitive root
+            break;
         }
     }
     seeds.resize(MOD);
@@ -178,25 +171,13 @@ inline vector<vector<long long>> operator * (const vector<vector<long long>>& a,
     }
     int rows = a.size(), cols = b[0].size(), inner = b.size();
     vector<vector<long long>> R(rows, vector<long long>(cols, 0));
-    #pragma omp parallel
-    {
-        vector<vector<long long>> localR(rows, vector<long long>(cols, 0));
-        #pragma omp for schedule(static) nowait
-        for (int i = 0; i < rows; ++i) {
+    #pragma omp parallel for schedule(static) collapse(2) shared(R, a, b)
+    for (int i = 0; i < rows; ++i)
+        for (int j = 0; j < cols; ++j)
             for (int k = 0; k < inner; ++k) {
-                long long aik = a[i][k];
-                for (int j = 0; j < cols; ++j) {
-                    localR[i][j] = (localR[i][j] + aik * b[k][j]) % MOD;
-                }
+                //#pragma omp atomic
+                R[i][j] = (R[i][j] + a[i][k] * b[k][j]) % MOD;
             }
-        }
-        #pragma omp critical
-        for (int i = 0; i < rows; ++i) {
-            for (int j = 0; j < cols; ++j) {
-                R[i][j] = (R[i][j] + localR[i][j]) % MOD;
-            }
-        }
-    }
     return R;
 }
 inline vector<long long> operator * (const vector<vector<long long>>& a, const vector<long long>& b) {
@@ -447,7 +428,7 @@ inline vector<vector<long long>> matrix_inverse(vector<vector<long long>> A) {
         #pragma omp parallel for private(j,k)
         for (j = i; j < n; ++j) {
             long long mul = (MOD - A[j][i - 1]) * inverse(A[i - 1][i - 1]) % MOD;
-            for (k = i - 1; k < n; ++k)
+            for (k = 0; k < n; ++k)
             {
                 A[j][k] = (A[j][k] + A[i - 1][k] * mul) % MOD;
                 I[j][k] = (I[j][k] + I[i - 1][k] * mul) % MOD;
@@ -455,22 +436,31 @@ inline vector<vector<long long>> matrix_inverse(vector<vector<long long>> A) {
         }
     }
     for (i = n - 2; i >= 0; --i) {
+        if (A[i + 1][i + 1] == 0) {
+            printf("Matrix Inversion Error : Matrix is singlular\n\n");
+            exit(1);
+        }
         #pragma omp parallel for private(j, k)
         for (j = i; j >= 0; --j) {
             long long mul = (MOD - A[j][i + 1]) * inverse(A[i + 1][i + 1]) % MOD;
-            for (k = 0; k <= i + 1; ++k)
+            for (k = 0; k < n; ++k)
             {
                 A[j][k] = (A[j][k] + A[i + 1][k] * mul) % MOD;
                 I[j][k] = (I[j][k] + I[i + 1][k] * mul) % MOD;
             }
         }
     }
-    #pragma omp parallel private(i,j)
+    #pragma omp parallel for private(i,j)
     for (i = 0; i < n; ++i) {
         long long t = inverse(A[i][i]);
         for (j = 0; j < n; ++j)
             I[i][j] = (I[i][j] * t) % MOD;
     }
+    // #pragma omp parallel for private(i,j)
+    // for (i = 0; i < n; ++i) {
+    //     for (j = 0; j < n; ++j)
+    //         I[i][j] = (I[i][j] * inverse(A[i][i])) % MOD;
+    // }
     return I;
 }
 inline long long matrix_determinant(vector<vector<long long>> A) {
@@ -633,11 +623,12 @@ inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b)
     vector<vector<long long>> R(m, vector<long long>(n, 0));
     vector<int> piv;
     int i, j, k, p = 0, elimi = 0;
+    #pragma omp parallel for private(i,j)
     for (i = 0; i < m; ++i)
     {
         for (j = 0; j < n - 1; ++j)
             R[i][j] = A[i][j];
-        R[i][j] = b[i];
+        R[i][n - 1] = b[i];
     }
     for (i = 1; i < n && i - 1 - p < m; ++i)
     {
@@ -646,9 +637,9 @@ inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b)
             bool P = true;
             for (j = i - p; j < m; ++j)
                 if (R[j][i - 1] != 0) {
-                    vector<long long> temp = R[i - 1 - p];
-                    R[i - 1 - p] = R[j];
-                    R[j] = temp;
+                    #pragma omp parallel for private(k)
+                    for (k = 0; k < R[0].size(); ++k)
+                        R[i - 1 - p][k] ^= R[j][k] ^= R[i - 1 - p][k] ^= R[j][k];
                     i--;
                     P = false;
                     break;
@@ -661,7 +652,10 @@ inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b)
         elimi++;
         long long temp = R[i - 1 - p][i - 1];
         R[i - 1 - p][i - 1] = 1;
-        for (j = i; j < n; ++j)    R[i - 1 - p][j] = (R[i - 1 - p][j] * inverse(temp)) % MOD;
+        #pragma omp parallel for private(j)
+        for (j = i; j < n; ++j)
+            R[i - 1 - p][j] = (R[i - 1 - p][j] * inverse(temp)) % MOD;
+        #pragma omp parallel for private(j,k)
         for (j = i - p; j < m; ++j) {
             long long mul = MOD - R[j][i - 1];
             if (mul == 0)  continue;
@@ -670,6 +664,7 @@ inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b)
         }
     }
     for (i = (int)piv.size() - 1; i > 0; --i) //upper elimination
+        #pragma omp parallel for private(j,k)
         for (j = i - 1; j >= 0; --j)
         {
             long long mul = MOD - R[j][piv[i]];
@@ -695,7 +690,9 @@ inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b)
     }
     if (R.size() == R[0].size() - 1) {
         vector<long long> r(R.size());
-        for (i = 0; i < r.size(); ++i)   r[i] = R[i][n - 1];
+        #pragma omp parallel for private(i)
+        for (i = 0; i < r.size(); ++i)
+            r[i] = R[i][n - 1];
         return r;
     }
     vector<long long> r(n - 1, 0);
@@ -983,127 +980,34 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
     }
     S=S*St;
 }
-inline void matrix_diagonalize_henry_optimized(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
-    int i, j, k, n = (int)A.size(), eigvec_count = 0, mat_i = 0;
-    vector<vector<long long>> AP_1 = matrix_power(A,MOD-1);
-    S.resize(n, vector<long long>(n,0));
-    D.clear();  D.resize(n, vector<long long>(n, 0));
-    vector<vector<long long>> ZN = Null_Space(AP_1 - I_n(n), Orth);
-    if(!ZN.empty()) {
-        for (j = 0; j < ZN.size(); ++j)
-            for (k = 0; k < ZN[0].size(); ++k)
-                S[j][k] = ZN[j][k];
-        eigvec_count = (int)ZN[0].size();
-    }
-    ZN = Null_Space(AP_1, Orth);
-    if(!ZN.empty())
-        for (j = 0; j < ZN.size(); ++j)
-            for (k = 0; k < ZN[0].size(); ++k)
-                S[j][k + eigvec_count] = ZN[j][k];
-    vector<vector<long long>> A2 = matrix_inverse(S) * A * S;
-    vector<vector<long long>> New_A(eigvec_count, vector<long long>(eigvec_count));  //New_A is invertible matrix. if New_A = A, A was invertible₩
-    for(j=0; j<eigvec_count; ++j) {
-        for(k=0; k<eigvec_count; ++k) {
-            New_A[j][k] = A2[j][k];
-        }
-    }
-    n = eigvec_count;
-    eigvec_count = 0;
-    vector<vector<long long>> Ss = I_n(n);
-    vector<vector<vector<long long>>> M;    M.push_back(New_A); //M works like a queue of matrix. mat_i is iterator of M.
-    vector<long long> FE(1, 1); //eigenvalues of M[mat_i]^something
-    long long powC = MOD - 1;
-    for (int pi = 0, stp = 0; pi < MOD_decompose.size(); ++pi, stp = 0) {
-        int mati_upperbound = (int)M.size();
-        vector<int> eigspace_dim;
-        powC /= MOD_decompose[pi];
-        vector<vector<long long>> ST(n, vector<long long>(n, 0));
-        for (; mat_i < mati_upperbound; ++mat_i, eigvec_count = 0) {
-            if (M[mat_i].size() == 1) {  //separation is done
-                M.push_back(M[mat_i]);
-                FE.push_back(M[mat_i][0][0]);
-                ST[stp][stp] = 1;
-                stp++;
-                continue;
-            }
-            if (M[mat_i].size() == 2) {  //2 by 2 matrix does not require query to be diagonalized. it can be done by a formular.
-                vector<vector<long long>> D2, S2;
-                matrix_diagonalize_2x2(M[mat_i], S2, D2, Orth);
-                M.push_back({ {D2[0][0]} });  M.push_back({ {D2[1][1]} });
-                FE.push_back(D2[0][0]);     FE.push_back(D2[1][1]);
-                ST[stp][stp] = S2[0][0];    ST[stp][stp + 1] = S2[0][1];  ST[stp + 1][stp] = S2[1][0];  ST[stp + 1][stp + 1] = S2[1][1];
-                stp += 2;
-                continue;
-            }
-            vector<vector<long long>> St(M[mat_i].size(), vector<long long>(M[mat_i].size()));  //eigenvectors set of a M[mat_i]
-            vector<vector<long long>> PM = matrix_power(M[mat_i], powC);
-            long long seed = seeds[FE[mat_i]] * inverse(MOD_decompose[pi]) % MOD;
-            long long seed2 = power(primitive, seed);
-            for (i = 0; i < ones_roots[MOD_decompose[pi]].size() && eigvec_count < M[mat_i].size(); ++i) {
-                long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;  //seeds are used for FE[mat_i]'s MOD_decompose[pi]th roots.
-                vector<vector<long long>> query = PM;
-                for (j = 0; j < query.size(); ++j)
-                    query[j][j] = (query[j][j] + MOD - candidate) % MOD;   //PM - candidate*I
-                ZN = Null_Space(query, Orth);  //quering with candidates of PM's eigenvalues.
-                if (ZN.empty())
-                    continue;  //if a candidate is not a eigenvalue, continue.
-                eigspace_dim.push_back((int)ZN[0].size());
-                FE.push_back(candidate);
-                for (j = 0; j < ZN.size(); ++j)
-                    for (k = 0; k < ZN[0].size(); ++k)
-                        St[j][k + eigvec_count] = ZN[j][k];     //copying NullSpace to St
-                eigvec_count += (int)ZN[0].size();   //if eigvec_count reaches M[mati]'s size, we can stop quering early.
-            }
-            vector<vector<long long>> mt = matrix_inverse(St) * M[mat_i] * St;    //seperating eigenspace
-            for (i = 0; i < St.size(); ++i)
-                for (j = 0; j < St.size(); ++j)
-                    ST[i + stp][j + stp] = St[i][j];    //copying Sts to one n*n S
-            stp += St.size();
-            matrix_chop(M, mt, eigspace_dim);     //chop mt by eigspace_dim and put them into M. It's like queuing.
-            eigspace_dim.clear();
-        }
-        Ss = Ss * ST; //update S
-    }
-    for (int Di = 0; mat_i < M.size(); ++mat_i)
-        for (i = 0; i < M[mat_i].size(); ++i, ++Di)
-            D[Di][Di] = FE[mat_i];   //at last step, each M[mati] has only one eigenvalue(FE[mat_i]) regardless of the M[mat_i]'s size.
-    vector<vector<long long>> St = I_n((int)S.size());
-    for(i=0; i<Ss.size(); ++i) {
-        for(j=0; j<Ss.size(); ++j) {
-            St[i][j] = Ss[i][j];
-        }
-    }
-    S=S*St;
-}
+
 
 inline void func1() {
-    int N = 100, i, j, k;
+    int N = 500, i, j, k;
     double avt = 0;
     vector<vector<long long>> I(N, vector<long long>(N, 0)), S1, D1, S2, D2;
     for (i = 0; i < N; ++i)  I[i][i] = 1;
     for (int trial = 1; trial < 1000000000; ++trial) {
         vector<vector<long long>> tm = I;
-        for (i = 0; i < N - 1; ++i) {
-            for (j = i + 1; j < N; ++j) {
+        for (int i = 0; i < N - 1; ++i)
+            for (int j = i + 1; j < N; ++j) {
                 long long mul = rand() % MOD;
-                for (k = 0; k < N; ++k)
+                for (int k = 0; k < N; ++k)
                     tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
             }
-        }
-        for (i = N - 1; i > 0; --i) {
-            for (j = i - 1; j >= 0; --j) {
+        for (int i = N - 1; i > 0; --i)
+            for (int j = i - 1; j >= 0; --j) {
                 long long mul = rand() % MOD;
-                for (k = 0; k < N; ++k)
+                for (int k = 0; k < N; ++k)
                     tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
             }
-        }
         vector<vector<long long>> E(N, vector<long long>(N, 0));
         for (i = 0; i < N; ++i)  E[i][i] = rand() % MOD;
         vector<vector<long long>> DC = tm * E * matrix_inverse(tm);
-        clock_t s2, f2;
-        s2 = clock();
-        matrix_diagonalize_henry_optimized(DC, S2, D2, false);
-        f2 = clock();
+        auto start = chrono::high_resolution_clock::now();
+        //matrix_print(DC);
+        matrix_diagonalize_henry(DC, S2, D2, false);
+        auto end = chrono::high_resolution_clock::now();
         if (DC * S2 != S2 * D2 || matrix_determinant(S2) == 0) {
             printf("NOT GOOD...\n\n");
             matrix_print(DC);
@@ -1113,9 +1017,10 @@ inline void func1() {
             matrix_print(S2 * D2 * matrix_inverse(S2));
             exit(1);
         }
-        double d2 = (double)(f2 - s2) / CLOCKS_PER_SEC;
-        avt += d2;
-        printf("-- %d\t\t%lf sec.\t\t(avg %lf sec)\n", trial, d2, avt / trial);
+        chrono::duration<double> e1 = end - start;
+        double d1 = (double)(e1.count());
+        avt += d1;
+        printf("-- %d\t\t%lf sec.\t\t(avg %lf sec)\n", trial, d1, avt / trial);
     }
 }
 inline void func2() {
@@ -1159,19 +1064,24 @@ inline void func4() {
     I = I_n(N);
     for (int trial = 1; trial < 1000000000; ++trial) {
         vector<vector<long long>> tm = I;
-        for (i = 0; i < N - 1; ++i) {
-            for (j = i + 1; j < N; ++j) {
-                long long mul = rand() % MOD;
-                for (k = 0; k < N; ++k)
-                    tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
-            }
-        }
-        for (i = N - 1; i > 0; --i) {
-            for (j = i - 1; j >= 0; --j) {
-                long long mul = rand() % MOD;
-                for (k = 0; k < N; ++k)
-                    tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
-            }
+        #pragma omp parallel
+        {
+            #pragma omp for schedule(dynamic)
+            for (int i = 0; i < N - 1; ++i)
+                for (int j = i + 1; j < N; ++j) {
+                    long long mul = rand() % MOD;
+                    for (int k = 0; k < N; ++k)
+                        tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+                }
+            #pragma omp barrier
+
+            #pragma omp for schedule(dynamic)
+            for (int i = N - 1; i > 0; --i)
+                for (int j = i - 1; j >= 0; --j) {
+                    long long mul = rand() % MOD;
+                    for (int k = 0; k < N; ++k)
+                        tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+                }
         }
         vector<vector<long long>> E(N, vector<long long>(N, 0));
         for (i = 0; i < N; ++i)  E[i][i] = rand() % MOD;
@@ -1180,7 +1090,7 @@ inline void func4() {
         matrix_diagonalize_BF(DC, S1, D1, false);
         auto f1 = chrono::high_resolution_clock::now();
         auto s2 = chrono::high_resolution_clock::now();
-        matrix_diagonalize_henry_optimized(DC, S2, D2, false);
+        matrix_diagonalize_henry(DC, S2, D2, false);
         auto f2 = chrono::high_resolution_clock::now();
         if (DC * S2 != S2 * D2 || matrix_determinant(S2) == 0) {
             printf("NOT GOOD...\n\n");
@@ -1203,33 +1113,39 @@ inline void func4() {
         //matrix_print(tm);
     }
 }
+vector<vector<long long>> matmul(const vector<vector<long long>>& a, const vector<vector<long long>>& b) {
+    int rows = a.size();
+    int inner = a[0].size();  // Also the number of rows in b
+    int cols = b[0].size();
+    vector<vector<long long>> result(rows, vector<long long>(cols, 0));
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            for (int k = 0; k < inner; ++k) {
+                result[i][j] = (result[i][j] + a[i][k] * b[k][j]) % MOD;
+            }
+        }
+    }
+    return result;
+}
 inline void func5() {
-    int N = 1000;
+    int N = 500;
     double avt = 0;
     vector<vector<long long>> I, S1, D1, S2, D2;
     I = I_n(N);
     for (int trial = 1; trial < 1000000000; ++trial) {
         vector<vector<long long>> tm = I;
-
-        #pragma omp parallel
-        {
-            #pragma omp for schedule(dynamic)
-            for (int i = 0; i < N - 1; ++i)
-                for (int j = i + 1; j < N; ++j) {
-                    long long mul = rand() % MOD;
-                    for (int k = 0; k < N; ++k)
-                        tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
-                }
-            #pragma omp barrier
-
-            #pragma omp for schedule(dynamic)
-            for (int i = N - 1; i > 0; --i)
-                for (int j = i - 1; j >= 0; --j) {
-                    long long mul = rand() % MOD;
-                    for (int k = 0; k < N; ++k)
-                        tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
-                }
-        }
+        for (int i = 0; i < N - 1; ++i)
+            for (int j = i + 1; j < N; ++j) {
+                long long mul = rand() % MOD;
+                for (int k = 0; k < N; ++k)
+                    tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+            }
+        for (int i = N - 1; i > 0; --i)
+            for (int j = i - 1; j >= 0; --j) {
+                long long mul = rand() % MOD;
+                for (int k = 0; k < N; ++k)
+                    tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+            }
 
         //matrix created
         vector<long long> tv(N);
@@ -1246,7 +1162,12 @@ inline void func5() {
 
         //vector_print((tm + tm * tm) * tv);
 
-        auto K = matrix_inverse(tm);
+        //auto K = matrix_inverse(tm);
+
+        auto K = tm * tm;
+        auto P = matmul(tm, tm);
+        if(!(K==P))
+            printf("????????????????????????????");
 
 
         auto end = chrono::high_resolution_clock::now();
@@ -1261,47 +1182,30 @@ int main()
     //MOD = 1000000007;         //2*500000003         worst distributed
     //MOD = 100000007;          //2*491*101833
     //MOD = 131071;             //2*3*5*17*257
-    //MOD = 524287;             //2*3*3*3*7*19*73     well distributed
+    MOD = 524287;             //2*3*3*3*7*19*73     well distributed
     //MOD = 65537;              //2^16
     //MOD = 653659;               //2*3*108943
-    MOD = 101;                //2*2*5*5
-    //auto start = chrono::high_resolution_clock::now();
+    //MOD = 101;                //2*2*5*5
+    auto start = chrono::high_resolution_clock::now();
     Initiation();
-    //auto end = chrono::high_resolution_clock::now();
-    //chrono::duration<double> elapsed = end - start;
-    //printf("%lf sec\n\n", elapsed.count());
+    auto end = chrono::high_resolution_clock::now();
+    chrono::duration<double> elapsed = end - start;
+    printf("%lf sec\n\n", elapsed.count());
     //func5();
-    func4();
+    //func4();
+    func1();
     vector<vector<long long>> A = {
-        //        {3,5,7,2},
-        //        {1,4,7,2},
-        //        {6,3,9,17},
-        //        {13,5,4,16}
 
-        //        {1,0,0,0},
-        //        {0,2,9,0},
-        //        {0,9,3,1},
-        //        {0,0,1,4}
-
-                // {1,2,3,4},
-                // {2,3,4,5},
-                // {9,4,5,6},
-                // {1,5,2,7}
-
-                //        {3,5,9,3},
-                //        {1,0,0,0},
-                //        {0,1,0,0},
-                //        {0,0,1,0}
-
-                //        {1,2,0},
-                //        {2,3,4},
-                //        {3,6,1}
-
-               {63,63, 0,48,13},
-               {48, 5,89,65,57},
-               {32,69, 1,57,68},
-               {95, 8,46,53,32},
-               {34,100,50,80,70}
+            //    {63,63, 0,48,13},
+            //    {48, 5,89,65,57},
+            //    {32,69, 1,57,68},
+            //    {95, 8,46,53,32},
+            //    {34,100,50,80,70}
+            {84   ,   32  ,    49    ,  67  ,    63},
+            {18   ,   94   ,   52    ,  40  ,    61},
+            {8    ,   69  ,    98    ,  26  ,    91},
+            {9    ,   96  ,    48    ,  24  ,    4},
+            {76   ,   20  ,    42    ,  41  ,    18}
 
         //        {{51 ,   78   , 50  ,  8  ,  42},
         //            {32 ,   15   , 17   , 68 ,   47},
@@ -1309,21 +1213,10 @@ int main()
         //            {11   , 53  ,  36  ,  88   , 12},
         //            {65 ,   77   , 8  ,  58   , 31}}
 
-        //        {{98   , 50  ,  4 ,   80 ,   51},
-        //            {   27  ,  68 ,   96   , 84  ,  82},
-        //            {64  ,  57  ,  20  ,  9  ,  48},
-        //            {     0   , 40  ,  10  ,  34   , 5},
-        //            { 23   , 73   , 80   , 43   , 80}}
-
-
-        //        {1,0,0,0},
-        //        {0,0,0,0},
-        //        {0,0,2,0},
-        //        {0,0,0,3}
     }, S, D, S1, D1, M1, M2, M3;
     vector<vector<long long>> E = {
-        {0,0,0,0,0},
-        {0,0,0,0,0},
+        {1,0,0,0,0},
+        {0,2,0,0,0},
         {0,0,19,0,0},
         {0,0,0,665,0},
         {0,0,0,0,2343}
@@ -1335,10 +1228,11 @@ int main()
 
     vector<vector<long long>> M = A * E * matrix_inverse(A);
 
-    //matrix_print(A * K);
-    //vector<vector<long long>> R1 = matrix_partial_multiply(A, K, F);
     matrix_print(M);
-    matrix_diagonalize_henry_optimized(M,S,D,false);
+    //vector<vector<long long>> R1 = matrix_partial_multiply(A, K, F);
+    matrix_print(A * matrix_inverse(A));
+    matrix_print(matrix_power(M, MOD-1));
+    matrix_diagonalize_henry(M,S,D,false);
     matrix_print(S);    matrix_print(D);
     matrix_print(S*D*matrix_inverse(S));
 
