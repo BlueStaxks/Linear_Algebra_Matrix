@@ -1,4 +1,5 @@
 #include <fstream>
+#include <string>
 #include <time.h>
 #include <chrono>
 
@@ -84,44 +85,111 @@ inline vector<long long> divisor(long long a) {
     sort(r.begin(), r.end());
     return r;
 }
+void readData(const string& filename) {
+    // Open file for binary reading
+    ifstream inFile(filename, ios::binary);
+    if (!inFile) {
+        cerr << "Error opening file for reading." << endl;
+        return;
+    }
+    // Function to read vectors from file
+    auto readVector = [&inFile](auto& vec) {
+        size_t size;
+        inFile.read(reinterpret_cast<char*>(&size), sizeof(size));
+        vec.resize(size);
+        inFile.read(reinterpret_cast<char*>(vec.data()), size * sizeof(decltype(vec[0])));
+    };
+    // Read the long long primitive
+    inFile.read(reinterpret_cast<char*>(&primitive), sizeof(primitive));
+    // Read vectors
+    readVector(int_inverse);
+    readVector(seeds);
+    readVector(MOD_decompose);
+    readVector(MOD_divisors);
+    // Read vector of vectors<int>
+    size_t outerSize;
+    inFile.read(reinterpret_cast<char*>(&outerSize), sizeof(outerSize));
+    ones_roots.resize(outerSize);
+    for (auto& vec : ones_roots) {
+        readVector(vec);
+    }
+    inFile.close();
+    // Check for errors
+    if (!inFile.good()) {
+        cerr << "Error occurred during file read." << endl;
+        return;
+    }
+}
+void writeData(const string& filename) {
+    // Open a file for binary writing, ios::binary tells ofstream to treat the file as binary
+    ofstream outFile(filename, ios::binary | ios::out);
+    if (!outFile) {
+        cerr << "Error opening file for writing." << endl;
+        return;
+    }
+    // Write the long long primitive
+    outFile.write(reinterpret_cast<char*>(&primitive), sizeof(primitive));
+    // Lambda to write vector to file, handles both vector<int> and vector<long long>
+    auto writeVector = [&outFile](const auto& vec) {
+        size_t size = vec.size();
+        outFile.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        outFile.write(reinterpret_cast<const char*>(vec.data()), size * sizeof(decltype(vec[0])));
+    };
+    // Write vector<int> and vector<long long> to file
+    writeVector(int_inverse);
+    writeVector(seeds);
+    writeVector(MOD_decompose);
+    writeVector(MOD_divisors);
+    // Write vector of vectors<int>
+    size_t outerSize = ones_roots.size();
+    outFile.write(reinterpret_cast<const char*>(&outerSize), sizeof(outerSize));
+    for (const auto& vec : ones_roots) {
+        writeVector(vec);
+    }
+    outFile.close();
+    if (!outFile.good()) {
+        cerr << "Error occurred during file write." << endl;
+        return;
+    }
+    //cout << "Data written successfully." << endl;
+}
 void Initiation() {
-    int_inverse.resize(MOD, 0);
-
-    //    ifstream MODfile;
-    //    string name = to_string(MOD);
-    //    name+=".txt";
-    //    MODfile.open(name);
-    //    if(MODfile.is_open()) {
-    //
-    //    }
-
-    MOD_decompose = decompose(MOD - 1);
-    MOD_divisors = divisor(MOD - 1);
-    primitive = 0;
-    for (int i = 2; i < MOD; ++i) {
-        bool P = true;
-        for (int j = 1; j < MOD_divisors.size() - 1; ++j)
-            if (power(i, MOD_divisors[j]) == 1) {
-                P = false;
+    string name = to_string(MOD);
+    name+=".bin";
+    ifstream file1(name);
+    if(!file1) { //no file
+        int_inverse.resize(MOD, 0);
+        MOD_decompose = decompose(MOD - 1);
+        MOD_divisors = divisor(MOD - 1);
+        primitive = 0;
+        for (int i = 2; i < MOD; ++i) {
+            bool P = true;
+            for (int j = 1; j < MOD_divisors.size() - 1; ++j)
+                if (power(i, MOD_divisors[j]) == 1) {
+                    P = false;
+                    break;
+                }
+            if (P) {
+                primitive = i; //find smallest primitive root
                 break;
             }
-        if (P) {
-            primitive = i; //find smallest primitive root
-            break;
         }
+        seeds.resize(MOD);
+        ones_roots.resize(MOD);
+        for (long long i = 1, t = primitive; i < MOD; ++i, t = t * primitive % MOD)
+            seeds[t] = (int)i;  //primitive ^ seeds[i] = i
+        #pragma omp parallel for schedule(dynamic)
+        for (long long i = 1; i < MOD; ++i) {
+            for (int j = 0; j < MOD_divisors.size() - 1; ++j) // 1^(1/i) = ones_roots.front() ~ back()
+                if (power(i, MOD_divisors[j]) == 1) {
+                    #pragma omp critical
+                    ones_roots[MOD_divisors[j]].push_back((int)i); //calculate order of all numbers
+                }
+        } //files are created.
+        writeData(name);
     }
-    seeds.resize(MOD);
-    ones_roots.resize(MOD);
-    for (long long i = 1, t = primitive; i < MOD; ++i, t = t * primitive % MOD)
-        seeds[t] = (int)i;  //primitive ^ seeds[i] = i
-    #pragma omp parallel for schedule(dynamic)
-    for (long long i = 1; i < MOD; ++i) {
-        for (int j = 0; j < MOD_divisors.size() - 1; ++j) // 1^(1/i) = ones_roots.front() ~ back()
-            if (power(i, MOD_divisors[j]) == 1) {
-                #pragma omp critical
-                ones_roots[MOD_divisors[j]].push_back((int)i); //calculate order of all numbers
-            }
-    }
+    else
+        readData(name);
 }
 
 template <typename T>
@@ -173,7 +241,7 @@ inline vector<vector<long long>> operator * (const vector<vector<long long>>& a,
     }
     int rows = a.size(), cols = b[0].size(), inner = b.size();
     vector<vector<long long>> R(rows, vector<long long>(cols, 0));
-    #pragma omp parallel for schedule(static) collapse(2) shared(R, a, b)
+    #pragma omp parallel for schedule(static) collapse(2)
     for (int i = 0; i < rows; ++i)
         for (int j = 0; j < cols; ++j)
             for (int k = 0; k < inner; ++k) {
@@ -912,7 +980,7 @@ inline void dia_th(DiaS& G) {
     for (int i = 0; i < ones_roots[G.modde].size() && eigvec_count < G.A.size(); ++i) {
         long long candidate = seed2 * ones_roots[G.modde][i] % MOD;  //seeds are used for seed's G.modde th roots.
         vector<vector<long long>> query = PM;
-        #pragma omp parallel for
+        //#pragma omp parallel for
         for (int j = 0; j < query.size(); ++j)
             query[j][j] = (query[j][j] + MOD - candidate) % MOD;   //PM - candidate*I
         ZN = Null_Space(query, G.Orth);  //quering with candidates of PM's eigenvalues.
@@ -921,7 +989,7 @@ inline void dia_th(DiaS& G) {
         eigspace_dim.push_back((int)ZN[0].size());
         G.loca.push_back(G.location + eigvec_count);
         G.fe.push_back(candidate);
-        #pragma omp parallel for
+        //#pragma omp parallel for
         for (int j = 0; j < ZN.size(); ++j)
             for (int k = 0; k < ZN[0].size(); ++k)
                 G.S[j][k + eigvec_count] = ZN[j][k];     //copying NullSpace to G.S
@@ -931,7 +999,7 @@ inline void dia_th(DiaS& G) {
     for (int i = 0, p = 0; i < eigspace_dim.size(); ++i) {
         G.m.push_back(N);
         G.m.back().resize(eigspace_dim[i], vector<long long>(eigspace_dim[i]));
-        #pragma omp parallel for
+        //#pragma omp parallel for
         for (int j = 0; j < eigspace_dim[i]; ++j)
             for (int k = 0; k < eigspace_dim[i]; ++k)
                 G.m.back()[j][k] = mt[j + p][k + p];
@@ -939,7 +1007,7 @@ inline void dia_th(DiaS& G) {
     }
     return;
 }
-inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+inline void matrix_diagonalize_henry(const vector<vector<long long>>& A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     int i, j, k, n = (int)A.size(), eigvec_count = 0, mat_i = 0;
     vector<vector<long long>> AP_1 = matrix_power(A,MOD-1);
     S.resize(n, vector<long long>(n,0));
@@ -968,10 +1036,6 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
     n = eigvec_count;
     eigvec_count = 0;
     vector<vector<long long>> Ss = I_n(n);
-    // if (matrix_power(New_A, MOD - 1) != I_n(n)) {
-    //     printf("Matrix diagonalization Error : Matrix is not diagonalizable\n\n"); //if not periodic, not diagonalizable
-    //     exit(1);
-    // }
     vector<vector<vector<long long>>> M;    M.push_back(New_A); //M works like a queue of matrix. mat_i is iterator of M.
     vector<long long> FE(1, 1); //eigenvalues of M[mat_i]^something
     vector<int> loca(1,0);
@@ -995,37 +1059,39 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
             SP.push_back({loca[mat_i], M[mat_i].size()});
         }
         for(i=0; i<threads.size(); ++i)
-            threads[i].join();
-        //-------------------------threads end
+            threads[i].join();          //-------------------------threads end
         for(i=0; i<G.size(); ++i) {
             for(j=0; j<G[i].m.size(); ++j) {
-                if(G[i].m[j].size() == 1) {
+                if(G[i].m[j].size() == 1)
                     D[G[i].loca[j]][G[i].loca[j]] = G[i].m[j][0][0];
-                }
                 else if(G[i].m[j].size() > 1) {
                     M.push_back(G[i].m[j]);
                     FE.push_back(G[i].fe[j]);
                     loca.push_back(G[i].loca[j]);
                 }
             }
-            #pragma omp parallel for private(j,k) collapse(2)
+            #pragma omp parallel for private(j,k) collapse(2) schedule(static)
             for (j = SP[i].first; j < SP[i].first + SP[i].second; ++j)
                 for (k = SP[i].first; k < SP[i].first + SP[i].second; ++k)
                     ST[j][k] = G[i].S[j - SP[i].first][k - SP[i].first];
         }
         Ss = Ss * ST;
     }
-    vector<vector<long long>> St = I_n((int)S.size());
-    #pragma omp parallel for private(i,j) collapse(2)
+    #pragma omp parallel for private(i)
     for(i=0; i<Ss.size(); ++i)
-        for(j=0; j<Ss.size(); ++j)
-            St[i][j] = Ss[i][j];
-    S=S*St;
+        Ss[i].resize((int)S.size(), 0);
+    Ss.reserve(S.size() - Ss.size());
+    vector<long long> tv(S.size(), 0);
+    for(i=(int)Ss.size(); i<S.size(); ++i)
+        Ss.emplace_back(S.size(), 0);
+    for(i=Ss.size(); i<S.size(); ++i)
+        Ss[i][i] = 1;
+    S=S*Ss;
 }
 
 
 inline void func1() {
-    int N = 700, i, j, k;
+    int N = 50, i, j, k;
     double avt = 0;
     vector<vector<long long>> I(N, vector<long long>(N, 0)), S1, D1, S2, D2;
     for (i = 0; i < N; ++i)  I[i][i] = 1;
@@ -1215,9 +1281,9 @@ inline void func5() {
 int main()
 {
     //MOD = 1000000007;         //2*500000003         worst distributed
-    //MOD = 100000007;          //2*491*101833
+    MOD = 100000007;          //2*491*101833
     //MOD = 131071;             //2*3*5*17*257
-    MOD = 524287;             //2*3*3*3*7*19*73     well distributed
+    //MOD = 524287;             //2*3*3*3*7*19*73     well distributed
     //MOD = 65537;              //2^16
     //MOD = 653659;               //2*3*108943
     //MOD = 101;                //2*2*5*5
