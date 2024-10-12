@@ -1058,8 +1058,7 @@ inline void matrix_diagonalize_henry(const vector<vector<long long>>& A, vector<
             threads.emplace_back(dia_th, ref(G[mat_i - ini]));
             SP.push_back({loca[mat_i], M[mat_i].size()});
         }
-        for(i=0; i<threads.size(); ++i)
-            threads[i].join();          //-------------------------threads end
+        for(i=0; i<threads.size(); ++i) threads[i].join();  //-------------------------threads end
         for(i=0; i<G.size(); ++i) {
             for(j=0; j<G[i].m.size(); ++j) {
                 if(G[i].m[j].size() == 1)
@@ -1077,14 +1076,15 @@ inline void matrix_diagonalize_henry(const vector<vector<long long>>& A, vector<
         }
         Ss = Ss * ST;
     }
+    int ss = (int)Ss.size();
     #pragma omp parallel for private(i)
-    for(i=0; i<Ss.size(); ++i)
+    for(i=0; i<ss; ++i)
         Ss[i].resize((int)S.size(), 0);
-    Ss.reserve(S.size() - Ss.size());
+    Ss.reserve(S.size() - ss);
     vector<long long> tv(S.size(), 0);
-    for(i=(int)Ss.size(); i<S.size(); ++i)
+    for(i=ss; i<S.size(); ++i)
         Ss.emplace_back(S.size(), 0);
-    for(i=Ss.size(); i<S.size(); ++i)
+    for(i=ss; i<S.size(); ++i)
         Ss[i][i] = 1;
     S=S*Ss;
 }
@@ -1097,12 +1097,14 @@ inline void func1() {
     for (i = 0; i < N; ++i)  I[i][i] = 1;
     for (int trial = 1; trial <= 1000000000; ++trial) {
         vector<vector<long long>> tm = I;
+        #pragma omp parallel for
         for (int i = 0; i < N - 1; ++i)
             for (int j = i + 1; j < N; ++j) {
                 long long mul = rand() % MOD;
                 for (int k = 0; k < N; ++k)
                     tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
             }
+        #pragma omp parallel for
         for (int i = N - 1; i > 0; --i)
             for (int j = i - 1; j >= 0; --j) {
                 long long mul = rand() % MOD;
@@ -1233,18 +1235,20 @@ inline void func4() {
     }
 }
 inline void func5() {
-    int N = 500;
+    int N = 10;
     double avt = 0;
     vector<vector<long long>> I, S1, D1, S2, D2;
     I = I_n(N);
-    for (int trial = 1; trial < 1000000000; ++trial) {
+    for (int trial = 1; trial <= 1; ++trial) {
         vector<vector<long long>> tm = I;
+        #pragma omp parallel for
         for (int i = 0; i < N - 1; ++i)
             for (int j = i + 1; j < N; ++j) {
                 long long mul = rand() % MOD;
                 for (int k = 0; k < N; ++k)
                     tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
             }
+        #pragma omp parallel for
         for (int i = N - 1; i > 0; --i)
             for (int j = i - 1; j >= 0; --j) {
                 long long mul = rand() % MOD;
@@ -1254,9 +1258,8 @@ inline void func5() {
 
         //matrix created
         vector<long long> tv(N);
-        for(int i=0; i<N; ++i)
-            tv[i] = rand() % MOD;
-
+        vector<vector<long long>> dia(N, vector<long long>(N, 0));
+        for(int i=0; i<N-2; ++i)  tv[i] = dia[i][i] = rand() % MOD;
         //---------------------------------- operation time start -----------------
         auto start = chrono::high_resolution_clock::now();
         
@@ -1269,6 +1272,11 @@ inline void func5() {
 
         //auto K = matrix_inverse(tm);
 
+        auto K = tm*dia*matrix_inverse(tm); // diagonalizable matrix.
+        vector<vector<long long>> S,D;
+        matrix_diagonalize_henry(K,S,D,false);
+        matrix_print(K);
+        matrix_print(S), matrix_print(D), matrix_print(S * D * matrix_inverse(S));
 
 
         auto end = chrono::high_resolution_clock::now();
@@ -1294,7 +1302,8 @@ int main()
     //printf("%lf sec\n\n", elapsed.count());
     //func5();
     //func4();
-    func1();
+    func5();
+    return 0;
     vector<vector<long long>> A = {
 
             //    {63,63, 0,48,13},
