@@ -1,6 +1,8 @@
 #include <fstream>
 #include <time.h>
+#include <chrono>
 
+#include <omp.h>
 #include <math.h>
 #include <vector>
 #include <iostream>
@@ -78,40 +80,111 @@ inline vector<long long> divisor(long long a) {
     sort(r.begin(), r.end());
     return r;
 }
+void readData(const string& filename) {
+    // Open file for binary reading
+    ifstream inFile(filename, ios::binary);
+    if (!inFile) {
+        cerr << "Error opening file for reading." << endl;
+        return;
+    }
+    // Function to read vectors from file
+    auto readVector = [&inFile](auto& vec) {
+        size_t size;
+        inFile.read(reinterpret_cast<char*>(&size), sizeof(size));
+        vec.resize(size);
+        inFile.read(reinterpret_cast<char*>(vec.data()), size * sizeof(decltype(vec[0])));
+    };
+    // Read the long long primitive
+    inFile.read(reinterpret_cast<char*>(&primitive), sizeof(primitive));
+    // Read vectors
+    readVector(int_inverse);
+    readVector(seeds);
+    readVector(MOD_decompose);
+    readVector(MOD_divisors);
+    // Read vector of vectors<int>
+    size_t outerSize;
+    inFile.read(reinterpret_cast<char*>(&outerSize), sizeof(outerSize));
+    ones_roots.resize(outerSize);
+    for (auto& vec : ones_roots) {
+        readVector(vec);
+    }
+    inFile.close();
+    // Check for errors
+    if (!inFile.good()) {
+        cerr << "Error occurred during file read." << endl;
+        return;
+    }
+}
+void writeData(const string& filename) {
+    // Open a file for binary writing, ios::binary tells ofstream to treat the file as binary
+    ofstream outFile(filename, ios::binary | ios::out);
+    if (!outFile) {
+        cerr << "Error opening file for writing." << endl;
+        return;
+    }
+    // Write the long long primitive
+    outFile.write(reinterpret_cast<char*>(&primitive), sizeof(primitive));
+    // Lambda to write vector to file, handles both vector<int> and vector<long long>
+    auto writeVector = [&outFile](const auto& vec) {
+        size_t size = vec.size();
+        outFile.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        outFile.write(reinterpret_cast<const char*>(vec.data()), size * sizeof(decltype(vec[0])));
+    };
+    // Write vector<int> and vector<long long> to file
+    writeVector(int_inverse);
+    writeVector(seeds);
+    writeVector(MOD_decompose);
+    writeVector(MOD_divisors);
+    // Write vector of vectors<int>
+    size_t outerSize = ones_roots.size();
+    outFile.write(reinterpret_cast<const char*>(&outerSize), sizeof(outerSize));
+    for (const auto& vec : ones_roots) {
+        writeVector(vec);
+    }
+    outFile.close();
+    if (!outFile.good()) {
+        cerr << "Error occurred during file write." << endl;
+        return;
+    }
+    //cout << "Data written successfully." << endl;
+}
 void Initiation() {
-    int_inverse.resize(MOD, 0);
-
-    //    ifstream MODfile;
-    //    string name = to_string(MOD);
-    //    name+=".txt";
-    //    MODfile.open(name);
-    //    if(MODfile.is_open()) {
-    //
-    //    }
-
-    MOD_decompose = decompose(MOD - 1);
-    MOD_divisors = divisor(MOD - 1);
-    primitive = 1;
-    for (int i = 2; i < MOD; ++i) {
-        bool P = true;
-        for (int j = 1; j < MOD_divisors.size() - 1; ++j)
-            if (power(i, MOD_divisors[j]) == 1) {
-                P = false;
+    string name = to_string(MOD);
+    name+=".bin";
+    ifstream file1(name);
+    if(!file1) { //no file
+        int_inverse.resize(MOD, 0);
+        MOD_decompose = decompose(MOD - 1);
+        MOD_divisors = divisor(MOD - 1);
+        primitive = 0;
+        for (int i = 2; i < MOD; ++i) {
+            bool P = true;
+            for (int j = 1; j < MOD_divisors.size() - 1; ++j)
+                if (power(i, MOD_divisors[j]) == 1) {
+                    P = false;
+                    break;
+                }
+            if (P) {
+                primitive = i; //find smallest primitive root
                 break;
             }
-        if (P) {
-            primitive = i; //find smallest primitive root
-            break;
         }
+        seeds.resize(MOD);
+        ones_roots.resize(MOD);
+        for (long long i = 1, t = primitive; i < MOD; ++i, t = t * primitive % MOD)
+            seeds[t] = (int)i;  //primitive ^ seeds[i] = i
+        #pragma omp parallel for schedule(dynamic)
+        for (long long i = 1; i < MOD; ++i) {
+            for (int j = 0; j < MOD_divisors.size() - 1; ++j) // 1^(1/i) = ones_roots.front() ~ back()
+                if (power(i, MOD_divisors[j]) == 1) {
+                    #pragma omp critical
+                    ones_roots[MOD_divisors[j]].push_back((int)i); //calculate order of all numbers
+                }
+        } //files are created.
+        writeData(name);
     }
-    seeds.resize(MOD);
-    ones_roots.resize(MOD);
-    for (long long i = 1, t = primitive; i < MOD; ++i, t = t * primitive % MOD) {
-        seeds[t] = (int)i;  //primitive ^ seeds[i] = i
-        for (int j = 0; j < MOD_divisors.size() - 1; ++j) // 1^(1/i) = ones_roots.front() ~ back()
-            if (power(i, MOD_divisors[j]) == 1)
-                ones_roots[MOD_divisors[j]].push_back((int)i); //calculate order of all numbers
-    }
+    else
+        readData(name);
 }
 
 template <typename T>
@@ -260,7 +333,7 @@ inline vector<long long> operator - (const vector<long long>& a, const vector<lo
     }
     vector<long long> R(a.size(), 0);
     for (int i = 0; i < a.size(); ++i)
-        R[i] = (a[i] - b[i] + MOD) % MOD;
+        R[i] = (a[i] - b[i]) % MOD;
     return R;
 }
 inline vector<long long> Extended_Euclid(long long a, long long b) {
@@ -1007,33 +1080,31 @@ inline void matrix_diagonalize_henry_optimized(vector<vector<long long>> A, vect
 }
 
 inline void func1() {
-    int N = 100, i, j, k;
+    int N = 5, i, j, k;
     double avt = 0;
     vector<vector<long long>> I(N, vector<long long>(N, 0)), S1, D1, S2, D2;
     for (i = 0; i < N; ++i)  I[i][i] = 1;
     for (int trial = 1; trial < 1000000000; ++trial) {
         vector<vector<long long>> tm = I;
-        for (i = 0; i < N - 1; ++i) {
-            for (j = i + 1; j < N; ++j) {
+        for (int i = 0; i < N - 1; ++i)
+            for (int j = i + 1; j < N; ++j) {
                 long long mul = rand() % MOD;
-                for (k = 0; k < N; ++k)
+                for (int k = 0; k < N; ++k)
                     tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
             }
-        }
-        for (i = N - 1; i > 0; --i) {
-            for (j = i - 1; j >= 0; --j) {
+        for (int i = N - 1; i > 0; --i)
+            for (int j = i - 1; j >= 0; --j) {
                 long long mul = rand() % MOD;
-                for (k = 0; k < N; ++k)
+                for (int k = 0; k < N; ++k)
                     tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
             }
-        }
         vector<vector<long long>> E(N, vector<long long>(N, 0));
         for (i = 0; i < N; ++i)  E[i][i] = rand() % MOD;
         vector<vector<long long>> DC = tm * E * matrix_inverse(tm);
-        clock_t s2, f2;
-        s2 = clock();
-        matrix_diagonalize_henry_optimized(DC, S2, D2, false);
-        f2 = clock();
+        auto start = chrono::high_resolution_clock::now();
+        //matrix_print(DC);
+        matrix_diagonalize_henry(DC, S2, D2, false);
+        auto end = chrono::high_resolution_clock::now();
         if (DC * S2 != S2 * D2 || matrix_determinant(S2) == 0) {
             printf("NOT GOOD...\n\n");
             matrix_print(DC);
@@ -1043,9 +1114,10 @@ inline void func1() {
             matrix_print(S2 * D2 * matrix_inverse(S2));
             exit(1);
         }
-        double d2 = (double)(f2 - s2) / CLOCKS_PER_SEC;
-        avt += d2;
-        printf("-- %d\t\t%lf sec.\t\t(avg %lf sec)\n", trial, d2, avt / trial);
+        chrono::duration<double> e1 = end - start;
+        double d1 = (double)(e1.count());
+        avt += d1;
+        printf("-- %d\t\t%lf sec.\t\t(avg %lf sec)\n", trial, d1, avt / trial);
     }
 }
 inline void func2() {
@@ -1132,18 +1204,73 @@ inline void func4() {
         //matrix_print(tm);
     }
 }
+inline void func5() {
+    int N = 1000;
+    double avt = 0;
+    vector<vector<long long>> I, S1, D1, S2, D2;
+    I = I_n(N);
+    for (int trial = 1; trial < 1000000000; ++trial) {
+        vector<vector<long long>> tm = I;
+
+        #pragma omp parallel
+        {
+            #pragma omp for schedule(dynamic)
+            for (int i = 0; i < N - 1; ++i)
+                for (int j = i + 1; j < N; ++j) {
+                    long long mul = rand() % MOD;
+                    for (int k = 0; k < N; ++k)
+                        tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+                }
+            #pragma omp barrier
+
+            #pragma omp for schedule(dynamic)
+            for (int i = N - 1; i > 0; --i)
+                for (int j = i - 1; j >= 0; --j) {
+                    long long mul = rand() % MOD;
+                    for (int k = 0; k < N; ++k)
+                        tm[j][k] = (tm[j][k] + tm[i][k] * mul) % MOD;
+                }
+        }
+
+        //matrix created
+        vector<long long> tv(N);
+        for(int i=0; i<N; ++i)
+            tv[i] = rand() % MOD;
+
+        //vector created
+
+        //---------------------------------- operation time start -----------------
+        auto start = chrono::high_resolution_clock::now();
+        
+        //long long rank = matrix_rank(DC);
+        //printf("%lld\n", rank);
+
+        //matrix_print((tm + tm - tm) * tm);
+
+        //vector_print((tm + tm * tm) * tv);
+
+        auto K = matrix_inverse(tm);
+
+
+        auto end = chrono::high_resolution_clock::now();
+        chrono::duration<double> elapsed = end - start;
+        printf("%lf sec\n\n", elapsed.count());
+    }
+    return;
+}
 
 int main()
 {
     //MOD = 1000000007;         //2*500000003         worst distributed
-    //MOD = 100000007;          //2*491*101833
-    MOD = 131071;             //2*3*5*17*257
-    //MOD = 524287;             //2*3*3*3*7*19*73     well distributed
+    MOD = 100000007;          //2*491*101833
+    //MOD = 131071;             //2*3*5*17*257
+   // MOD = 524287;             //2*3*3*3*7*19*73     well distributed
     //MOD = 65537;              //2^16
     //MOD = 653659;               //2*3*108943
     //MOD = 101;                //2*2*5*5
     Initiation();
-    func4();
+    func1();
+    //func4();
     vector<vector<long long>> A = {
         //        {3,5,7,2},
         //        {1,4,7,2},
