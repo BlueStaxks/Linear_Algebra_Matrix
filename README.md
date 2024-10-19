@@ -148,9 +148,6 @@ So, if you want absolute accuracy, use Linear_Algebra_finite.cpp.
 -----------------------
 
 
-
-Vector's multiplication and Matrix_vector multiplication are also defined.
-
 Use main() to do your calculations!!
 
 Good Luck
