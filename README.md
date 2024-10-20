@@ -130,13 +130,13 @@ matrix_diagonalize_henry() // This is the fasteset way I found to diagonalize. c
 
 Linear_Algebra_finite_parallel is modified version of Linear_Algebra_finite.
 
-Using parallel computing with <omp.h> and <thread>, This code can compute big matrix faster.
+Using parallel computing with omp.h and thread, This code can compute big matrix faster.
 
 But, noticable improvement will arise when N is bigger than 200.
 
 This code not only use parallel processing for simple for loop, but logical workload distribution using custom thread control, for example, matrix_diagonalize_henry function.
 
-Beware that this code reqires a compiler which is compatible with <omp.h> and <thread> library.
+Beware that this code reqires a compiler which is compatible with omp.h and thread library.
 
 Parallel processing will give you faster running time, but it might cause problems such as race condition due to compiler or scheduler, resulting bizarre output.
 
