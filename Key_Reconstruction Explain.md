@@ -5,3 +5,5 @@ This detection algorithm is very robust. It can reconstruct the key even with 11
 This method requires a (s+1) by (m) matrix where s is maximum number of fake shares and m is number of points including valid and fake shares.
 
 Reciever uses the matrix to find valid shares and only use them to reconstruct K.
+
+If number of real shares are less than t+1, the system cannot reconstruct K because the matrix does not have information of y coordinates so it is secure. 
