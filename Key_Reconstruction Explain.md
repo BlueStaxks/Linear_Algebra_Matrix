@@ -7,3 +7,8 @@ This method requires a (s+1) by (m) matrix where s is maximum number of fake sha
 Reciever uses the matrix to find valid shares and only use them to reconstruct K.
 
 If number of real shares are less than t+1, the system cannot reconstruct K because the matrix does not have information of y coordinates so it is secure. 
+
+
+*Beware, that this method is not guaranteed to succeed, but highly probable to succeed.
+
+(mathematical explanation will be updated)
