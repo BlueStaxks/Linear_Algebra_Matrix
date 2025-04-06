@@ -710,6 +710,75 @@ inline vector<long long> Ax_b(vector<vector<long long>>& A, vector<long long> b)
     }
     return r;
 }
+inline bool is_in(vector<vector<long long>>& A, vector<long long> b) {
+    if (A.size() != b.size()) {
+        printf("Ax=b calculation Error : Size is different\n\n");
+        exit(1);
+    }
+    int m = (int)A.size(), n = (int)A[0].size();
+    n++;
+    vector<vector<long long>> R(m, vector<long long>(n, 0));
+    vector<int> piv;
+    int i, j, k, p = 0, elimi = 0;
+    for (i = 0; i < m; ++i)
+    {
+        for (j = 0; j < n - 1; ++j)
+            R[i][j] = A[i][j];
+        R[i][j] = b[i];
+    }
+    for (i = 1; i < n && i - 1 - p < m; ++i)
+    {
+        if (R[i - 1 - p][i - 1] == 0)
+        {
+            bool P = true;
+            for (j = i - p; j < m; ++j)
+                if (R[j][i - 1] != 0) {
+                    vector<long long> temp = R[i - 1 - p];
+                    R[i - 1 - p] = R[j];
+                    R[j] = temp;
+                    i--;
+                    P = false;
+                    break;
+                }
+            if (!P)  continue;
+            p++;
+            continue;
+        }
+        piv.push_back(i - 1);
+        elimi++;
+        long long temp = R[i - 1 - p][i - 1];
+        R[i - 1 - p][i - 1] = 1;
+        for (j = i; j < n; ++j)    R[i - 1 - p][j] = (R[i - 1 - p][j] * inverse(temp)) % MOD;
+        for (j = i - p; j < m; ++j) {
+            long long mul = MOD - R[j][i - 1];
+            if (mul == 0)  continue;
+            for (k = i - 1; k < n; ++k)
+                R[j][k] = (R[j][k] + R[i - 1 - p][k] * mul) % MOD;
+        }
+    }
+    for (i = (int)piv.size() - 1; i > 0; --i) //upper elimination
+        for (j = i - 1; j >= 0; --j)
+        {
+            long long mul = MOD - R[j][piv[i]];
+            for (k = piv[i]; k < n; ++k)
+                R[j][k] = (R[j][k] + R[i][k] * mul) % MOD;
+        }
+    for (i = m - 1; i >= 0; --i) //zero row solvablity
+    {
+        bool P = false;
+        for (j = 0; j < n - 1; ++j)
+            if (R[i][j] != 0) {
+                P = true;
+                break;
+            }
+        if (P)   break;
+        if (R[i][n - 1] != 0)
+            return false;
+        R.pop_back();
+        b.pop_back();
+    }
+    return true;
+}
 inline void matrix_diagonalize_2x2(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     S.resize(2, vector<long long>(2, 0));
     D.resize(2, vector<long long>(2, 0));
