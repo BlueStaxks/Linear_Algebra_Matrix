@@ -112,6 +112,8 @@ Null_Space()
 
 Ax=b()                     // This function finds x. if there is more than one solution, this function will return particular solution.
 
+is_in()                    // This boolean function return true if a given vector is in C(A). A is a given matrix. 
+
 matrix_diagonalize_BF()    // This function do brute force way to find all eigenvalues. Trying 1 to p-1.
 
 matrix_diagonalize_fast()  // This function is a faster diagonalize function. check the document about Galois Field Matrix in this repository. (The document is not yet fully written)
