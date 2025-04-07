@@ -56,15 +56,14 @@ Since matrix M incorporates the first t rows generated from vector v, Gaussian e
 
 After elimination, Side B computes the Null Space. If the Null Space is trivial, fewer than t+1 valid shares exist, since at least t+1 valid shares are necessary for a non-trivial Null Space.
 
-The method may fail if a randomly generated fake share coincidentally matches a valid polynomial column. The probability of this occurring for a single fake column is \((\frac{1}{p})^s\), given that s random numbers must match the actual polynomial values \(p_1(x), ..., p_s(x)\).
+The method may fail if a randomly generated fake share coincidentally matches a valid polynomial column. The probability of this occurring for a single fake column is (1/p)^s, given that s random numbers must match the actual polynomial values p₁(x), ..., pₛ(x).
 
 Thus, the overall failure probability is calculated as:
 
-\[
-\text{Failure Probability} = 1 - \left(1 - \left(\frac{1}{p}\right)^s\right)^{\text{number of fake shares}}
-\]
+Failure Probability = 1 - (Probability all fake columns differ from valid columns)  
+= 1 - (1 - (1/p)^s)^(number of fake shares)
 
 Even with s fake shares, the probability of failure rapidly approaches zero:
-- For example, when \(p = 524287\) and \(s = 1\), the failure probability ≈ \(2 \times 10^{-6}\).
-- For \(s \geq 2\), the failure probability is virtually negligible.
+- For example, when p = 524287 and s = 1, the failure probability ≈ 0.000002.
+- For s ≥ 2, the failure probability is virtually negligible.
 
