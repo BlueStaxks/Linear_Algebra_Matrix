@@ -36,7 +36,8 @@ Because Side A selects the shares' x-coordinates randomly, columns of matrix A c
 
 7. Side B expands matrix A into matrix M:
    - 7.1. Extract the first row of A and name it vector v.
-   - 7.2. Append t rows above vector v, where the ith row is v^i, with i ranging from 0 to t-1. (v^i means raising each element of v to the power i.)
+   - 7.2. Append t rows on top of A, where the ith row is v^i, with i ranging from 0 to t-1. (v^i means raising each element of v to the power i.)
+   - 7.2. Name it M.
 
 8. Side B applies Gaussian elimination to matrix M, resulting in matrix X.
 
