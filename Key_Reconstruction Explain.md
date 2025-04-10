@@ -83,3 +83,4 @@ Even with s fake shares, the probability of failure rapidly approaches zero:
 - For s ≥ 2, the failure probability is virtually negligible.
 
 Even though the probability of failure is negligible, this issue can be avoided by verifying the randomly chosen vector and replacing it if it coincides with an actual vector from s polynomials.
+(This may affect statistical indistinguishability)
