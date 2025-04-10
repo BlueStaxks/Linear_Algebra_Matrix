@@ -1,4 +1,7 @@
 # Linear_Algebra_Matrix
+
+
+All cpp file does not require special library or extension. basic C++17 can run them all.
  
 
 
