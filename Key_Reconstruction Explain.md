@@ -41,7 +41,7 @@ Because Side A selects the shares' x-coordinates randomly, columns of matrix A c
    - 7.2. Append t rows on top of A, where the ith row is v^i, with i ranging from 0 to t-1. (v^i means raising each element of v to the power i.)
    - 7.2. Name it M.
 
-8. Side B computes the Null Space of matrix M. A trivial Null Space indicates insufficient valid shares (or a rare method failure, explained below).
+8. Side B computes the Null Space of matrix M. A trivial Null Space indicates insufficient valid shares.
 
 9. Side B identifies indices of columns corresponding to non-zero entries in vectors of the Null Space.
 
@@ -82,3 +82,4 @@ Even with s fake shares, the probability of failure rapidly approaches zero:
 - For example, when p = 524287 and s = 1, the failure probability ≈ 0.000002.
 - For s ≥ 2, the failure probability is virtually negligible.
 
+Even though the probability of failure is negligible, this issue can be avoided by verifying the randomly chosen vector and replacing it if it coincides with an actual vector from s polynomials.
