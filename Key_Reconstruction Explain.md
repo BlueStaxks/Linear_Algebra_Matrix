@@ -1,3 +1,5 @@
+### Introduce
+
 The code is designed to detect fake shares and successfully reconstruct the secret key K.
 
 This detection algorithm is highly robust. It can reconstruct the key even with 11 valid shares and 1000 fake shares (t = 10, s = 1001, prime = 524287).
@@ -12,7 +14,7 @@ If the number of real shares is fewer than t+1, the system cannot reconstruct K 
 
 ---
 
-Method:
+### Method:
 
 1. Side A initiates by generating n Shamir shares, including both valid and fake shares, in a Galois Field (GF) with prime p. Any subset of t+1 valid shares can reconstruct the secret key.
 
@@ -39,23 +41,35 @@ Because Side A selects the shares' x-coordinates randomly, columns of matrix A c
    - 7.2. Append t rows on top of A, where the ith row is v^i, with i ranging from 0 to t-1. (v^i means raising each element of v to the power i.)
    - 7.2. Name it M.
 
-8. Side B applies Gaussian elimination to matrix M, resulting in matrix X.
+8. Side B computes the Null Space of matrix M. A trivial Null Space indicates insufficient valid shares (or a rare method failure, explained below).
 
-9. Side B computes the Null Space of matrix X. A trivial Null Space indicates insufficient valid shares (or a rare method failure, explained below).
+9. Side B identifies indices of columns corresponding to non-zero entries in vectors of the Null Space.
 
-10. Side B identifies indices of columns corresponding to non-zero entries in vectors of the Null Space.
+10. Side B extracts the first elements of the identified columns from matrix A; these represent the x-coordinates of valid shares.
 
-11. Side B extracts the first elements of the identified columns from matrix A; these represent the x-coordinates of valid shares.
-
-12. Side B reconstructs the secret key K using these valid shares.
+11. Side B reconstructs the secret key K using these valid shares.
 
 ---
 
-Reasoning and Probability of Failure:
+### Analysis of Gaussian Elimination and Probability of Failure
 
-Since matrix M incorporates the first t rows generated from vector v, Gaussian elimination completely removes columns derived from genuine polynomial shares. This occurs because linear combinations of these first t rows can represent any polynomial of degree at most t-1. In contrast, columns derived from fake shares cannot be fully eliminated.
+Since matrix M incorporates the first t rows generated from vector v, Gaussian elimination can completely remove the last s rows derived from genuine polynomial shares. This occurs because linear combinations of these first t rows can represent any polynomial of degree at most t-1. In contrast, columns derived from fake shares cannot be fully eliminated.
 
-After elimination, Side B computes the Null Space. If the Null Space is trivial, fewer than t+1 valid shares exist, since at least t+1 valid shares are necessary for a non-trivial Null Space.
+If we assume an ideal scenario with all fake columns placed on the left, the resulting matrix after clean elimination would look like:
+
+C = [X; R 0],
+
+where R represents the bottom-left random part submatrix.
+
+Of course, such a perfect elimination is not possible for side B because Side B does not know the key matrix created by Side A. Nevertheless, since Gaussian elimination does not change the NullSpace of the matrix, the NullSpace computed by Side B is identical to the null space of matrix C.
+
+It can be easily seen that the NullSpace of C has zero entries corresponding to fake columns if these columns are random vectors. This clarifies why at least t+1 real columns are required for the existence of a non-trivial NullSpace.
+
+If only t real columns exist, the problem reduces to examining the top-right t by t submatrix X from C. Matrix X is invertible because its rows are constructed to be linearly independent.
+
+Consequently, after Side B computes the NullSpace, a trivial NullSpace implies fewer than t+1 valid shares, as at least t+1 valid shares are necessary for a non-trivial NullSpace.
+
+
 
 The method may fail if a randomly generated fake share coincidentally matches a valid polynomial column. The probability of this occurring for a single fake column is (1/p)^s, given that s random numbers must match the actual polynomial values p₁(x), ..., pₛ(x).
 
