@@ -786,6 +786,7 @@ inline void Shamir_Shares_Generate(long long K, long long real, long long fake, 
     1. initiate Shamir-SS for a polynomial degree of n with random secret key K.
     2. create real share and fake shares
     3. create DHF matrix M
+    4. Mix positions
     */
 
     //1
@@ -834,6 +835,18 @@ inline void Shamir_Shares_Generate(long long K, long long real, long long fake, 
         }
         M.push_back(r);
     }
+
+    //4
+    for(int i=0; i<real + fake; ++i) {
+        int k = rand() % (fake+real);
+        auto T1 = Points[i];
+        Points[i] = Points[k];
+        Points[k] = T1;
+
+        auto T2 = M[i];
+        M[i] = M[k];
+        M[k] = T2;
+    }
 }
 
 inline long long Detection_Algorithm(long long s, long long t, vector<pair<long long, long long>>& Points, vector<vector<long long>>& v) {
@@ -848,7 +861,6 @@ inline long long Detection_Algorithm(long long s, long long t, vector<pair<long 
     vector<vector<long long>> NL = Null_Space(M, false);
     if(NL.empty())
         return -1;
-
     vector<long long> b;
     vector<vector<long long>> A;
     for(int i=0; i<m && b.size() <= t+1; ++i)
@@ -902,6 +914,27 @@ int main()
     Initiation();
 
     testing();
+
+    vector<pair<long long, long long>> v;
+    vector<vector<long long>> M;
+    long long K = rand() % MOD, s = 5, t = 5, real = 6, fake = 5; //only when real > t, it is possible to reconstruct K 
+    bool possible = real > t;
+
+    auto start = chrono::high_resolution_clock::now();
+    Shamir_Shares_Generate(K, real, fake, s, t, v, M);
+    long long reconstructed_K = Detection_Algorithm(s, t, v, M);
+    auto end = chrono::high_resolution_clock::now();
+
+    if ((reconstructed_K == -1 && possible) || (possible && K != reconstructed_K)) {
+        printf("NOT GOOD...\n\n");
+        printf("original K      = %lld\nrecunstructed K = %lld\n", K, reconstructed_K);
+
+        exit(1);
+    }
+    printf("original K      = %lld\nrecunstructed K = %lld\n", K, reconstructed_K);
+    chrono::duration<double> e1 = end - start;
+    double d1 = (double)(e1.count());
+    printf("-- \t\t%lf sec\n", d1);
 
     return 0;
 }
