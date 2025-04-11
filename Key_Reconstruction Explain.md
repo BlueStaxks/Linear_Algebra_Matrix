@@ -63,7 +63,7 @@ where R represents the bottom-left random part submatrix.
 
 Of course, such a perfect elimination is not possible for side B because Side B does not know the key matrix created by Side A. Nevertheless, since Gaussian elimination does not change the NullSpace of the matrix, the NullSpace computed by Side B is identical to the null space of matrix C.
 
-It can be easily seen that the NullSpace of C has zero entries corresponding to fake columns if these columns are random vectors. This clarifies why at least t+1 real columns are required for the existence of a non-trivial NullSpace.
+It can be easily seen that the NullSpace of C has zero entries corresponding to fake columns because these columns are random vectors. This clarifies why at least t+1 real columns are required for the existence of a non-trivial NullSpace.
 
 If only t real columns exist, the problem reduces to examining the top-right t by t submatrix X from C. Matrix X is invertible because its rows are constructed to be linearly independent.
 
