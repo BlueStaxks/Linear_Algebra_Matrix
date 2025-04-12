@@ -70,7 +70,7 @@ A potential source of failure occurs if, by chance, the additional s values in a
 If there are multiple fake shares, the overall failure probability is given by:
   Failure Probability = 1 - (1 - (1/p)^s)^(number of fake shares)
 
-For instance, if p is 524287 and s = 1, then the chance that a fake share's vector accidentally matches that of a valid share is about 1 in 524287 (roughly 0.000002). For s ≥ 2, the probability becomes virtually negligible. This indicates that, under proper protocol execution, the chance that a fake share’s vector accidentally “passes” as a valid one is extremely low.
+For instance, if p is 524287 and s = 1, then the chance that a fake share's vector accidentally matches that of a valid share is about 1 in 524287 (roughly 0.000002). For s ≥ 2, the probability becomes virtually negligible as 1 - (1 - (1/p)^s)^s converges to 1. This indicates that, under proper protocol execution, the chance that a fake share’s vector accidentally “passes” as a valid one is extremely low.
 
 It is possible to add an additional verification step—such as reselecting and testing the vector for a fake share—if one wants to further minimize this risk, although this extra measure may slightly compromise the statistical indistinguishability between fake and valid share vectors.
 
@@ -78,4 +78,4 @@ It is possible to add an additional verification step—such as reselecting and 
 
 ### SUMMARY
 
-In summary, the protocol works by embedding a polynomial structure into the share vectors and then using null space analysis to pinpoint valid shares. The Gaussian elimination process in the extended matrix naturally cancels out contributions from valid shares (if enough exist), whereas fake shares, being random, cannot be similarly eliminated. Thus, only when there are at least t+1 valid shares does the null space become non-trivial, allowing for successful reconstruction of the secret key K. Failure under correct protocol execution can occur only when the minimum threshold of t+1 valid shares is not reached or in exceedingly rare cases when a fake share randomly mimics a valid one.
+In summary, the protocol functions by embedding a polynomial structure into the share vectors and then using null space analysis to identify the valid shares among all received shares. The extended matrix is constructed so that, after applying ideal elimination, the structured (valid) share vectors naturally cancel out—producing a zero block in their corresponding portion—while the random fake share vectors do not. Consequently, only when there are at least t+1 valid share vectors does the null space become non-trivial, allowing for successful reconstruction of the secret key K.
