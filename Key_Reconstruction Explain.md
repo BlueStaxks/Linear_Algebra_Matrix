@@ -65,11 +65,17 @@ It follows that the null space of C (and thus of M) contains zeros at the positi
 
 In the borderline case of exactly t valid shares, the top-right t × t submatrix D is invertible. The null space in this case would be trivial. Therefore, having fewer than t+1 valid shares precludes reconstruction—this is an intentional security feature.
 
-Failure can occur if, by chance, a fake share’s randomly chosen values match those that would have been produced by the valid polynomials. For a single fake share, the probability of its s random numbers coinciding with the expected valid values is approximately (1/p)^s. Therefore, if there are multiple fake shares, the overall failure probability is given by:
+A potential source of failure occurs if, by chance, the additional s values in a fake share’s vector exactly match the values that would be produced by the secret s polynomials. In other words, the problem arises when the fake share’s vector accidentally mimics a valid share’s vector. For a single fake share, the probability that all s randomly chosen numbers coincide with those computed by the valid polynomials is (1/p)^s, where p is the prime defining the finite field GF(p).
 
-Failure Probability = 1 - (1 - (1/p)^s)^(number of fake shares)
-For instance, with p = 524287 and s = 1, the chance of a match is about 1 in 524287 (roughly 0.000002), and for s ≥ 2 the probability becomes virtually negligible. This means that under proper protocol execution the chance of a fake share accidentally “passing” as a valid one is extremely low. It is even possible to add a verification step (for example, by reselecting and testing the fake share values) to eliminate this risk further, though such a step might somewhat reduce the statistical indistinguishability between fake and valid shares.
+If there are multiple fake shares, the overall failure probability is given by:
+  Failure Probability = 1 - (1 - (1/p)^s)^(number of fake shares)
 
-SUMMARY
+For instance, if p is 524287 and s = 1, then the chance that a fake share's vector accidentally matches that of a valid share is about 1 in 524287 (roughly 0.000002). For s ≥ 2, the probability becomes virtually negligible. This indicates that, under proper protocol execution, the chance that a fake share’s vector accidentally “passes” as a valid one is extremely low.
+
+It is possible to add an additional verification step—such as reselecting and testing the vector for a fake share—if one wants to further minimize this risk, although this extra measure may slightly compromise the statistical indistinguishability between fake and valid share vectors.
+
+---
+
+### SUMMARY
 
 In summary, the protocol works by embedding a polynomial structure into the share vectors and then using null space analysis to pinpoint valid shares. The Gaussian elimination process in the extended matrix naturally cancels out contributions from valid shares (if enough exist), whereas fake shares, being random, cannot be similarly eliminated. Thus, only when there are at least t+1 valid shares does the null space become non-trivial, allowing for successful reconstruction of the secret key K. Failure under correct protocol execution can occur only when the minimum threshold of t+1 valid shares is not reached or in exceedingly rare cases when a fake share randomly mimics a valid one.
