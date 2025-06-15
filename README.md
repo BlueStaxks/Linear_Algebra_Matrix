@@ -1,158 +1,115 @@
 # Linear_Algebra_Matrix
 
+This repository provides C++17 implementations for matrix and vector calculations, covering both exact rational arithmetic and modular arithmetic over Galois Fields. No external libraries or extensions are required; all code runs with basic C++17.
 
-All cpp file does not require special library or extension. basic C++17 can run them all.
- 
+---
 
+## Features
 
-This code is for Matrix and Vector calculation.
+### 1. Rational Arithmetic (`Ratio` Type)
 
-This code has "Ratio" type. It has sign bit, unsigned long long denominator and numerator.
+- Exact value calculations using a custom `Ratio` type:
+    - Structure: sign bit, unsigned long long denominator and numerator
+    - Operators: `<, <=, >, >=, ==, !=, +, -, *, /`
+    - Utility functions: `normalize()`, `Ratio_print()`, `Ratio_power()`
+- **Limitations:** Square roots and non-integer exponents (e.g., `2^(1/2)`, `3^(3.4)`) are not supported. For these, use `long double`.
 
+---
 
+### 2. Matrix Operations (Rational Arithmetic)
 
+- Operators: `==, !=, *, +, -`
+- Functions:
+    - `matrix_transpose()`
+    - `RatioMat_to_LDMat()` – converts Ratio matrix to long double matrix
+    - `matrix_power()`
+    - `matrix_print()`
+    - `matrix_inverse()`
+    - `matrix_determinant()`
+    - `QR_decomposition()` – Q columns are orthogonal (not normalized if using Ratio)
+    - `LU_decomposition()`
+    - `Eigen_Approx()` – only for symmetric, non-singular matrices (`long double`)
+    - `Null_Space()`
+    - `Ax=b()` – finds particular solution if multiple exist
+    - `matrix_full_row_rank()` – reduces m×n matrix to r×n (or r×r if repeated with transpose)
+    - `change_of_basis_P()` – computes change-of-basis matrix between two bases
+- Supports vector multiplication and matrix-vector multiplication.
 
-You can use this Ratio type to calculate exact value (bounded by unsigned long long).
+---
 
-Unfortunately, Ratio type cannot handle square root. For example, 2^(1/2) or 3^(3.4).
+### 3. Linear Algebra over Galois Field (`Linear_Algebra_finite`)
 
-This is very unfortunate since QR decomposition and Eigenvalues usually require square root.
+- Modular value is user-configurable and must be a prime.
+- Type: `long long` (modular arithmetic)
+- Functions:
+    - Modular routines: `inverse()`, `power()`, `gcd()`, `decompose()`, `divisor()`, `Extended_Euclid()`
+    - Matrix operators: `==, !=, *, +, -, |` (diagonal expansion)
+    - `matrix_transpose()`
+    - `matrix_power()`
+    - `matrix_rank()`
+    - `matrix_inverse()`
+    - `matrix_determinant()`
+    - `Null_Space()`
+    - `Ax=b()` – finds particular solution if more than one exists
+    - `is_in()` – checks if vector is in column space of matrix
+    - Eigenvalue decomposition:
+        - `matrix_diagonalize_BF()` – brute force all values 1 to p-1
+        - `matrix_diagonalize_fast()` – improved (see docs)
+        - `matrix_diagonalize_henry()` – fastest (see docs)
 
-For these applications, you need to use long double type.
+---
 
+### 4. Parallel Galois Field Computing (`Linear_Algebra_finite_parallel`)
 
+- Modified version of `Linear_Algebra_finite` for parallel computing.
+- Uses `omp.h` and threading to accelerate computations for large matrices (N > 200).
+- Advanced workload distribution: e.g., in `matrix_diagonalize_henry`.
+- **Warning:** Parallelism may cause race conditions or scheduler-related errors. For 100% accuracy, use the serial (`Linear_Algebra_finite.cpp`) version.
 
-----------------------
------------------------
+---
 
-This code includes following functions.
+## Usage
 
-For Ratio type :
+- All functionality is accessed via the `main()` function in each file.
+- Compilation does not require any non-standard headers (except `omp.h` for parallel).
 
-<, <=, >, >=, ==, !=, *, /, +, -
+Example compilation:
 
-normalize(), Ratio_print(), Ratio_power()
+```
+g++ -std=c++17 Linear_Algebra_Matrix.cpp -o linear_algebra_matrix
+g++ -std=c++17 Linear_Algebra_finite.cpp -o linear_algebra_finite
+g++ -std=c++17 -fopenmp Linear_Algebra_finite_parallel.cpp -o linear_algebra_finite_parallel
 
------------------------
+```
 
-For Matrix : 
+---
 
-==, !=, *, +, -
+## Best Practices
 
+- Use the `Ratio` type for exact arithmetic when integer/fraction results are required.
+- For operations requiring square roots, non-integer powers, or normalization, use `long double`.
+- Use the Galois field module for all modular arithmetic, ensuring your modulus is prime.
+- Employ the parallel version for large matrices, but prefer the serial implementation for smaller sizes or if strict correctness is essential.
 
-matrix_transpose()
+---
 
-RatioMat_to_LDMat()      // This function converts Ratio type Matrix to long double type Matrix
+## Summary Table
 
-matrix_power(), matrix_print()
+| Module | Numeric Type | Key Features |
+| --- | --- | --- |
+| Linear_Algebra_Matrix | Ratio / long double | Exact matrix, vector ops; QR/LU/Eigen |
+| Linear_Algebra_finite | long long (mod prime) | Modular matrix ops; null space; eigenvalues |
+| Linear_Algebra_finite_parallel | long long (mod prime) | Parallel matrix ops for large N |
 
-matrix_inverse()
+---
 
-matrix_determinant()
+## Documentation
 
-QR_decomposition()       // If you use Ratio type Matrix, Q's col vectors are only orthogonal. Not unit vectors. But QR is still A.
+- Every function is documented with comments.
+- For deeper mathematical and algorithmic explanations, see the inline documentation and (where referenced) supplementary documents in the repository.
 
-LU_decomposition()
+---
 
-Eigen_Approx()           // only Symmetric Matrix can be used(Not Singular).
+## Acknowledgement
 
-Null_Space()
-
-Ax=b()                   // This function finds x. if there is more than one solution, this function will return particular solution.
-
-matrix_full_row_rank()   // Makes m by n matrix to r by n matrix. (Do it and do it with transpose matrix, then it will become r by r invertible matrix or scalar)
-
-change_of_basis_P()      // This function uses 2 basis and make change-of-basis (B to C) matrix P.
-
---------------------------
-
-Vector's multiplication and Matrix_vector multiplication are also defined.
-
---------------------------
-------------------------
----------------------------
-
-
-# Linear_Algebra_Matrix(Galois Field)
- 
-
-Linear_Algebra_finite is about Galois field.
-
-You can set the modular value yourself. it must be a prime number.
-
-The code will run Initiation() with your modular number.
-
-only long long type is available.
-
-
-
-----------------------
------------------------
-
-This code includes following functions.
-
-For long long type :
-
-inverse(), power(), gcd(), decompose(), divisior(), Extended_Euclid()
-
------------------------
-
-For Matrix : 
-
-==, !=, *, +, -, |(diagonal expansion)
-
-matrix_transpose()
-
-matrix_power(), matrix_print()
-
-matrix_rank()
-
-matrix_inverse()
-
-matrix_determinant()
-
-Null_Space()
-
-Ax=b()                     // This function finds x. if there is more than one solution, this function will return particular solution.
-
-is_in()                    // This boolean function return true if a given vector is in C(A). A is a given matrix. 
-
-matrix_diagonalize_BF()    // This function do brute force way to find all eigenvalues. Trying 1 to p-1.
-
-matrix_diagonalize_fast()  // This function is a faster diagonalize function. check the document about Galois Field Matrix in this repository. (The document is not yet fully written)
-
-matrix_diagonalize_henry() // This is the fasteset way I found to diagonalize. check the document for mathematical detail. 
-
-
-
---------------------------
-------------------------
----------------------------
-
-
-# Linear_Algebra_Matrix(Galois Field) Parallel Computing
- 
-
-Linear_Algebra_finite_parallel is modified version of Linear_Algebra_finite.
-
-Using parallel computing with omp.h and thread, This code can compute big matrix faster.
-
-But, noticable improvement will arise when N is bigger than 200.
-
-This code not only use parallel processing for simple for loop, but logical workload distribution using custom thread control, for example, matrix_diagonalize_henry function.
-
-Beware that this code reqires a compiler which is compatible with omp.h and thread library.
-
-Parallel processing will give you faster running time, but it might cause problems such as race condition due to compiler or scheduler, resulting bizarre output.
-
-So, if you want absolute accuracy, use Linear_Algebra_finite.cpp.
-
-
-
-----------------------
------------------------
-
-
-Use main() to do your calculations!!
-
-Good Luck
+Good luck with your computations and mathematical research!
