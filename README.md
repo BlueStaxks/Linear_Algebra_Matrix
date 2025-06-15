@@ -1,158 +1,164 @@
-# Linear_Algebra_Matrix
+Linear Algebra Library
+This repository offers a comprehensive suite of matrix and vector operations in C++17, supporting both exact rational arithmetic and computations over finite (Galois) fields. The design emphasizes clarity, correctness, and academic rigor, suitable for teaching, research, and practical engineering.
 
+1. Exact Arithmetic (Ratio Type)
+Implements exact rational numbers using:
 
-All cpp file does not require special library or extension. basic C++17 can run them all.
- 
+struct Ratio {
+    bool sign;
+    unsigned long long num;
+    unsigned long long den;
+};
+Features:
+Arithmetic & comparisons: <, <=, >, >=, ==, !=, +, -, *, /
 
+Utility routines:
 
-This code is for Matrix and Vector calculation.
+normalize() — reduce to lowest terms
 
-This code has "Ratio" type. It has sign bit, unsigned long long denominator and numerator.
+Ratio_print() — display ratio as readable output
 
+Ratio_power() — integer exponentiation
 
+⚠️ Limitations: Does not support irrational or non-integer powers (e.g., √2 or 3⁰·⁴); convert to long double when needed.
 
+2. Matrix Operations with Ratio
+Supports exact integer-based matrices and vectors:
 
-You can use this Ratio type to calculate exact value (bounded by unsigned long long).
+Operators: ==, !=, +, -, * (matrix multiplication)
 
-Unfortunately, Ratio type cannot handle square root. For example, 2^(1/2) or 3^(3.4).
-
-This is very unfortunate since QR decomposition and Eigenvalues usually require square root.
-
-For these applications, you need to use long double type.
-
-
-
-----------------------
------------------------
-
-This code includes following functions.
-
-For Ratio type :
-
-<, <=, >, >=, ==, !=, *, /, +, -
-
-normalize(), Ratio_print(), Ratio_power()
-
------------------------
-
-For Matrix : 
-
-==, !=, *, +, -
-
+Standard functions:
 
 matrix_transpose()
 
-RatioMat_to_LDMat()      // This function converts Ratio type Matrix to long double type Matrix
-
-matrix_power(), matrix_print()
-
-matrix_inverse()
+matrix_power()
 
 matrix_determinant()
 
-QR_decomposition()       // If you use Ratio type Matrix, Q's col vectors are only orthogonal. Not unit vectors. But QR is still A.
+matrix_inverse()
+
+matrix_print()
+
+Decompositions & solvers:
 
 LU_decomposition()
 
-Eigen_Approx()           // only Symmetric Matrix can be used(Not Singular).
+QR_decomposition()
 
-Null_Space()
+Q has orthogonal columns (not normalized due to exact arithmetic), but A = Q·R holds.
 
-Ax=b()                   // This function finds x. if there is more than one solution, this function will return particular solution.
+Eigen_Approx() — approximates eigenvalues (only for symmetric, non-singular matrices), must convert to long double
 
-matrix_full_row_rank()   // Makes m by n matrix to r by n matrix. (Do it and do it with transpose matrix, then it will become r by r invertible matrix or scalar)
+Null_Space() — basis for null space
 
-change_of_basis_P()      // This function uses 2 basis and make change-of-basis (B to C) matrix P.
+Ax=b() — solve linear system; returns one particular solution if under‑determined
 
---------------------------
+matrix_full_row_rank() — reduce an m×n matrix to full row rank
 
-Vector's multiplication and Matrix_vector multiplication are also defined.
+change_of_basis_P() — compute basis transition matrix between two given bases
 
---------------------------
-------------------------
----------------------------
+Additionally, vector–vector and matrix–vector operations are fully implemented.
 
+3. Galois Field Arithmetic
+Supports arithmetic over ℤₚ (prime modulus):
 
-# Linear_Algebra_Matrix(Galois Field)
- 
+Initialization: Initiation(p) where p is a prime
 
-Linear_Algebra_finite is about Galois field.
+Modular arithmetic utilities:
+inverse(), power(), gcd(), Extended_Euclid(), decompose(), divisor()
 
-You can set the modular value yourself. it must be a prime number.
+Matrix operations over ℤₚ:
+Operators: ==, !=, +, -, * (with optional diagonal expansion via |)
 
-The code will run Initiation() with your modular number.
-
-only long long type is available.
-
-
-
-----------------------
------------------------
-
-This code includes following functions.
-
-For long long type :
-
-inverse(), power(), gcd(), decompose(), divisior(), Extended_Euclid()
-
------------------------
-
-For Matrix : 
-
-==, !=, *, +, -, |(diagonal expansion)
+Standard functions:
 
 matrix_transpose()
 
-matrix_power(), matrix_print()
+matrix_power()
 
 matrix_rank()
 
-matrix_inverse()
-
 matrix_determinant()
 
-Null_Space()
+matrix_inverse()
 
-Ax=b()                     // This function finds x. if there is more than one solution, this function will return particular solution.
+Null_Space(), Ax=b() — solves, returns a particular solution if not unique
 
-is_in()                    // This boolean function return true if a given vector is in C(A). A is a given matrix. 
+is_in() — checks if a vector belongs to the column space of a given matrix
 
-matrix_diagonalize_BF()    // This function do brute force way to find all eigenvalues. Trying 1 to p-1.
+Eigen-decomposition methods:
+matrix_diagonalize_BF() — brute-force search through {1, … p−1}
 
-matrix_diagonalize_fast()  // This function is a faster diagonalize function. check the document about Galois Field Matrix in this repository. (The document is not yet fully written)
+matrix_diagonalize_fast() — more efficient algorithm (documented separately)
 
-matrix_diagonalize_henry() // This is the fasteset way I found to diagonalize. check the document for mathematical detail. 
+matrix_diagonalize_henry() — fastest method available (see documentation)
 
+4. Parallel Finite-Field Variant
+A thread‑parallel version using OpenMP and std::thread, optimized for matrices with N ≥ 200. It accelerates core operations (e.g., matrix_diagonalize_henry()), but may introduce non-determinism or race conditions on smaller sizes. For guaranteed correctness, prefer the serial finite‑field implementation.
 
+5. Conversion & Mixed-Precision Usage
+Direct conversion: RatioMat_to_LDMat() — from rational matrix to long double matrix
 
---------------------------
-------------------------
----------------------------
+Use exact arithmetic for tasks requiring exactness
 
+Use long double for operations involving irrational numbers (e.g., normalization in QR, eigenvalue approximation)
 
-# Linear_Algebra_Matrix(Galois Field) Parallel Computing
- 
-
-Linear_Algebra_finite_parallel is modified version of Linear_Algebra_finite.
-
-Using parallel computing with omp.h and thread, This code can compute big matrix faster.
-
-But, noticable improvement will arise when N is bigger than 200.
-
-This code not only use parallel processing for simple for loop, but logical workload distribution using custom thread control, for example, matrix_diagonalize_henry function.
-
-Beware that this code reqires a compiler which is compatible with omp.h and thread library.
-
-Parallel processing will give you faster running time, but it might cause problems such as race condition due to compiler or scheduler, resulting bizarre output.
-
-So, if you want absolute accuracy, use Linear_Algebra_finite.cpp.
+6. Compilation & Usage
+All code is compatible with standard C++17, without external libraries:
 
 
+g++ -std=c++17 Linear_Algebra_Matrix.cpp -o linear_exact
+g++ -std=c++17 -fopenmp Linear_Algebra_finite_parallel.cpp -o linear_finite_parallel
+linear_exact – rational-based exact arithmetic
 
-----------------------
------------------------
+linear_finite_parallel – parallel finite-field computations (requires -fopenmp)
 
+Call main() in each file to use or test routines directly.
 
-Use main() to do your calculations!!
+7. Best Practices
+For exactness (no rounding), use Ratio and rational-matrix routines.
 
-Good Luck
+Where irrational numbers or approximate eigenvalues are needed, convert via RatioMat_to_LDMat() before using floating-point methods.
+
+Use finite-field routines for modular arithmetic in ℤₚ.
+
+For parallel matrix methods, ensure N ≥ 200 and be aware of possible concurrency variability.
+
+8. Summary of Contents
+Rational (Ratio) module:
+Ratio type + arithmetic/comparison operators
+
+normalize(), Ratio_print(), Ratio_power()
+
+Rational Matrix module:
+Matrix operators and matrix_transpose(), matrix_power(), matrix_determinant(), matrix_inverse(), matrix_print()
+
+LU_decomposition(), QR_decomposition(), Eigen_Approx(), Null_Space(), Ax=b(), matrix_full_row_rank(), change_of_basis_P()
+
+Finite-Field (long long mod p) module:
+Initiation(p), modular arithmetic (inverse(), power(), gcd(), Extended_Euclid(), decompose(), divisor())
+
+Matrix arithmetic, transpose, power, rank, determinant, inverse, null space, Ax=b(), is_in()
+
+Eigen decomposition: matrix_diagonalize_BF(), matrix_diagonalize_fast(), matrix_diagonalize_henry()
+
+Parallel Finite-Field (Linear_Algebra_finite_parallel):
+Parallel acceleration via OpenMP or threads
+
+Includes threaded eigen routines; best for large matrices
+
+Use serial version for small sizes or precise results.
+
+9. Glossary
+Ratio: Exact rational arithmetic
+
+Exact Matrix: Dense matrices over Ratio
+
+Finite-Field Matrix: Dense matrices over Zₚ
+
+Parallel Finite-Field: Threaded version for large matrices
+
+10. Reference & Documentation
+Please refer to code comments and the repository for details on algorithms, workflows, and examples.
+
+Good luck with your computations, proofs, and implementations!
