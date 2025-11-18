@@ -54,8 +54,7 @@ This repository provides C++17 implementations for matrix and vector calculation
     - `is_in()` – checks if vector is in column space of matrix
     - Eigenvalue decomposition:
         - `matrix_diagonalize_BF()` – brute force all values 1 to p-1
-        - `matrix_diagonalize_fast()` – improved
-        - `matrix_diagonalize_henry()` – fastest (see Henry_Linear_Algebra.pdf)
+        - `matrix_diagonalize_henry()` – fastest i found (see 'O(n^3) Diagonalization over Fp via the A^p=A criterion.pdf')
 
 ---
 
