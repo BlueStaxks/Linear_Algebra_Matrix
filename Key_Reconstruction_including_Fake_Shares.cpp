@@ -1389,7 +1389,7 @@ inline long long Detection_Algorithm(long long s, long long t, vector<pair<long 
     // 1. Construct the top Vandermonde basis rows
     for (int i = 0; i < t; ++i)
         for (int j = 0; j < m; ++j)
-            M[i][j] = power(v[j][0], i); // Assuming power applies % MOD internally
+            M[i][j] = power(v[j][0], i);
 
     // 2. Append the s auxiliary polynomial rows
     for (int i = t; i < t + s; ++i)
@@ -1405,9 +1405,7 @@ inline long long Detection_Algorithm(long long s, long long t, vector<pair<long 
     vector<vector<long long>> A;
 
     // 4. Identify valid shares and collect exactly t+1 points
-    for (int i = 0; i < m && b.size() < t + 1; ++i) { // FIX: Changed <= to <
-
-        // FIX: Check the entire row in the null space basis, not just the first column
+    for (int i = 0; i < m && b.size() < t + 1; ++i) {
         bool is_valid = false;
         for (int k = 0; k < NL[i].size(); ++k) {
             if (NL[i][k] != 0) {
@@ -1424,9 +1422,6 @@ inline long long Detection_Algorithm(long long s, long long t, vector<pair<long 
             A.push_back(tv);
         }
     }
-
-    // Security check: If we somehow didn't find enough valid shares 
-    // despite a non-trivial null space (shouldn't happen in theory, but safe to check)
     if (b.size() < t + 1)
         return -1;
 
