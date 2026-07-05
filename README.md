@@ -61,25 +61,16 @@ This repository provides C++17 implementations for matrix and vector calculation
 ### 4. Parallel Galois Field Computing (`Linear_Algebra_finite_parallel`)
 
 - Modified version of `Linear_Algebra_finite` for parallel computing.
-- Uses `omp.h` and threading to accelerate computations for large matrices (N > 200).
+- Uses `tbb` to accelerate computations.
 - Advanced workload distribution: e.g., in `matrix_diagonalize_henry`.
-- **Warning:** Parallelism may cause race conditions or scheduler-related errors. For 100% accuracy, use the serial (`Linear_Algebra_finite.cpp`) version.
 
 ---
 
 ## Usage
 
 - All functionality is accessed via the `main()` function in each file.
-- Compilation does not require any non-standard headers (except `omp.h` for parallel).
 
-Example compilation:
 
-```
-g++ -std=c++17 Linear_Algebra_Matrix.cpp -o linear_algebra_matrix
-g++ -std=c++17 Linear_Algebra_finite.cpp -o linear_algebra_finite
-g++ -std=c++17 -fopenmp Linear_Algebra_finite_parallel.cpp -o linear_algebra_finite_parallel
-
-```
 
 ---
 
