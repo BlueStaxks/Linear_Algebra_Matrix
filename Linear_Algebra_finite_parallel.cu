@@ -18,6 +18,8 @@
 #include <numeric>
 #include <iostream>
 #include <algorithm>
+#include <stdexcept>
+#include <exception>
 
 using namespace std;
 long long MOD = 10e9; //should be inside of INT32 range. It's GF so MOD must be a prime.
@@ -29,18 +31,20 @@ vector<long long> MOD_decompose;
 vector<long long> MOD_divisors;
 vector<vector<int>> ones_roots; // 1^(1/i) = ones_roots.front() ~ back()
 
-mt19937 rng(std::chrono::steady_clock::now().time_since_epoch().count());
 inline long long get_rand(long long mod) {
+    static std::atomic<int> seed_counter{ 1 };
+    thread_local mt19937 rng(
+        std::chrono::steady_clock::now().time_since_epoch().count() +
+        (seed_counter.fetch_add(1, std::memory_order_relaxed) * 19937)
+    );
     uniform_int_distribution<long long> dist(0, mod - 1);
     return dist(rng);
 }
 
-
 std::unique_ptr<tbb::spin_mutex[]> inverse_locks(new tbb::spin_mutex[1024]);
 inline long long inverse(long long a) {
     if (!a) {
-        printf("Integer Inverse Error : 0 has no inverse.\n\n");
-        exit(1);
+        throw std::invalid_argument("Integer Inverse Error: 0 has no inverse.");
     }
     int lock_index = a % 1024;
 
@@ -111,21 +115,24 @@ void readData(const string& filename) {
     auto readVector = [&inFile](auto& vec) {
         size_t size;
         inFile.read(reinterpret_cast<char*>(&size), sizeof(size));
-        vec.resize(size);
+        // Use assign or clear to wipe previous MOD data
+        vec.assign(size, 0);
         inFile.read(reinterpret_cast<char*>(vec.data()), size * sizeof(decltype(vec[0])));
         };
 
     inFile.read(reinterpret_cast<char*>(&primitive), sizeof(primitive));
 
-    // Read vectors
     readVector(int_inverse);
     readVector(seeds);
     readVector(MOD_decompose);
     readVector(MOD_divisors);
-    readVector(cubic_z); // Read the new cubic table
+    readVector(cubic_z);
 
     size_t outerSize;
     inFile.read(reinterpret_cast<char*>(&outerSize), sizeof(outerSize));
+
+    // Clear out the vector of vectors before resizing
+    ones_roots.clear();
     ones_roots.resize(outerSize);
     for (auto& vec : ones_roots)
         readVector(vec);
@@ -172,7 +179,7 @@ void Initiation() {
     ifstream file1(name);
 
     if (!file1) { // No file
-        int_inverse.resize(MOD, 0);
+        int_inverse.assign(MOD, 0);
         MOD_decompose = decompose(MOD - 1);
         MOD_divisors = divisor(MOD - 1);
 
@@ -191,7 +198,8 @@ void Initiation() {
             }
         }
 
-        seeds.resize(MOD);
+        seeds.assign(MOD, 0);
+        ones_roots.clear();
         ones_roots.resize(MOD);
         for (long long i = 1, t = primitive; i < MOD; ++i, t = (t * primitive) % MOD)
             seeds[t] = (int)i;  // primitive ^ seeds[i] = i
@@ -211,7 +219,7 @@ void Initiation() {
         // Precompute 1-Parameter Cubic Table (All MODs)
         // M z^3 + z + 1 = 0
         // ==========================================
-        cubic_z.resize(MOD, 0);
+        cubic_z.assign(MOD, 0);
         for (long long z = 1; z < MOD; ++z) {
             long long z3 = (z * z % MOD) * z % MOD;
 
@@ -249,31 +257,57 @@ inline void vector_print(const vector<long long> a) {
     printf("\n\n\n");
 }
 
-__global__ void matrixMulModKernel(const long long* A, const long long* B, long long* C, int rowsA, int colsA, int colsB, long long mod) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+#define TILE_SIZE 16
+__global__ void matrixMulModTiledKernel(const long long* A, const long long* B, long long* C, int rowsA, int colsA, int colsB, long long mod) {
+    // Allocate Shared Memory for the tile
+    __shared__ long long tile_A[TILE_SIZE][TILE_SIZE];
+    __shared__ long long tile_B[TILE_SIZE][TILE_SIZE];
 
-    if (row < rowsA && col < colsB) {
-        unsigned long long sum = 0;
-        for (int k = 0; k < colsA; ++k) {
-            sum += (unsigned long long)A[row * colsA + k] * B[k * colsB + col];
-            if (k & 1) sum %= mod;
+    int row = blockIdx.y * TILE_SIZE + threadIdx.y;
+    int col = blockIdx.x * TILE_SIZE + threadIdx.x;
+
+    unsigned long long sum = 0;
+
+    // Loop over the tiles of the input matrices
+    for (int t = 0; t < (colsA + TILE_SIZE - 1) / TILE_SIZE; ++t) {
+        
+        // Load data into shared memory (with bounds checking)
+        if (row < rowsA && t * TILE_SIZE + threadIdx.x < colsA)
+            tile_A[threadIdx.y][threadIdx.x] = A[row * colsA + t * TILE_SIZE + threadIdx.x];
+        else
+            tile_A[threadIdx.y][threadIdx.x] = 0;
+
+        if (t * TILE_SIZE + threadIdx.y < colsA && col < colsB)
+            tile_B[threadIdx.y][threadIdx.x] = B[(t * TILE_SIZE + threadIdx.y) * colsB + col];
+        else
+            tile_B[threadIdx.y][threadIdx.x] = 0;
+
+        __syncthreads(); // Wait for all threads to finish loading the tile
+
+        // Multiply the tile
+        for (int k = 0; k < TILE_SIZE; ++k) {
+            sum += (unsigned long long)tile_A[threadIdx.y][k] * tile_B[k][threadIdx.x];
+            if (sum >> 61) sum %= mod; // Deferred modulo
         }
+
+        __syncthreads(); // Wait before loading the next tile
+    }
+
+    // Write final result to global memory
+    if (row < rowsA && col < colsB) {
         C[row * colsB + col] = sum % mod;
     }
 }
 inline vector<vector<long long>> operator*(const vector<vector<long long>>& a, const vector<vector<long long>>& b) {
     if (a.empty() || b.empty() || a[0].empty() || b[0].empty()) return {};
-    if (a[0].size() != b.size()) {
-        ::printf("Matrix Multiplication Error : Matrix size does not match\n");
-        ::exit(1);
+    int rowsA = a.size(), colsA = a[0].size(), colsB = b[0].size();
+
+    if (colsA != b.size()) {
+        throw std::invalid_argument("Matrix Multiplication Error: Matrix size does not match");
     }
 
-    int rowsA = a.size();
-    int colsA = a[0].size();
-    int colsB = b[0].size();
-
-    if (rowsA <= 10 && colsA <= 10 && colsB <= 10) {
+    // CPU fallback for small matrices
+    if (rowsA <= 20 && colsA <= 20 && colsB <= 20) {
         vector<vector<long long>> R(rowsA, vector<long long>(colsB, 0));
         for (int i = 0; i < rowsA; ++i) {
             for (int k = 0; k < colsA; ++k) {
@@ -285,126 +319,163 @@ inline vector<vector<long long>> operator*(const vector<vector<long long>>& a, c
         return R;
     }
 
-    vector<long long> flat_A(rowsA * colsA);
-    vector<long long> flat_B(colsA * colsB);
-
-    for (int i = 0; i < rowsA; ++i)
-        copy(a[i].begin(), a[i].end(), flat_A.begin() + i * colsA);
-    for (int i = 0; i < colsA; ++i)
-        copy(b[i].begin(), b[i].end(), flat_B.begin() + i * colsB);
+    // Flatten input arrays
+    vector<long long> flat_A(rowsA * colsA), flat_B(colsA * colsB);
+    for (int i = 0; i < rowsA; ++i) copy(a[i].begin(), a[i].end(), flat_A.begin() + i * colsA);
+    for (int i = 0; i < colsA; ++i) copy(b[i].begin(), b[i].end(), flat_B.begin() + i * colsB);
 
     size_t bytesA = rowsA * colsA * sizeof(long long);
     size_t bytesB = colsA * colsB * sizeof(long long);
     size_t bytesC = rowsA * colsB * sizeof(long long);
 
+    // 1. Create stream
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
     long long* d_A, * d_B, * d_C;
-    cudaMalloc(&d_A, bytesA);
-    cudaMalloc(&d_B, bytesB);
-    cudaMalloc(&d_C, bytesC);
+    // 2. Async memory allocations
+    cudaMallocAsync(&d_A, bytesA, stream);
+    cudaMallocAsync(&d_B, bytesB, stream);
+    cudaMallocAsync(&d_C, bytesC, stream);
 
-    cudaMemcpy(d_A, flat_A.data(), bytesA, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_B, flat_B.data(), bytesB, cudaMemcpyHostToDevice);
+    // 3. Async memory copies to Device
+    cudaMemcpyAsync(d_A, flat_A.data(), bytesA, cudaMemcpyHostToDevice, stream);
+    cudaMemcpyAsync(d_B, flat_B.data(), bytesB, cudaMemcpyHostToDevice, stream);
 
-    dim3 threadsPerBlock(16, 16);
-    dim3 numBlocks((colsB + 15) / 16, (rowsA + 15) / 16);
+    dim3 threads(16, 16);
+    dim3 blocks((colsB + 15) / 16, (rowsA + 15) / 16);
 
-    // Pass the rowsA, colsA, colsB parameters explicitly to the kernel!
-    matrixMulModKernel << <numBlocks, threadsPerBlock >> > (d_A, d_B, d_C, rowsA, colsA, colsB, MOD);
+    // 4. Launch kernel into stream
+    matrixMulModTiledKernel << <blocks, threads, 0, stream >> > (d_A, d_B, d_C, rowsA, colsA, colsB, MOD);
 
+    // 5. Async memory copy back to Host, then strictly sync ONLY this stream
     vector<long long> flat_C(rowsA * colsB);
-    cudaMemcpy(flat_C.data(), d_C, bytesC, cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(flat_C.data(), d_C, bytesC, cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
 
-    cudaFree(d_A);
-    cudaFree(d_B);
-    cudaFree(d_C);
+    // Async memory free and stream destruction
+    cudaFreeAsync(d_A, stream);
+    cudaFreeAsync(d_B, stream);
+    cudaFreeAsync(d_C, stream);
+    cudaStreamDestroy(stream);
 
+    // Reconstruct 2D Vector
     vector<vector<long long>> R(rowsA, vector<long long>(colsB));
-    for (int i = 0; i < rowsA; ++i)
+    for (int i = 0; i < rowsA; ++i) {
         copy(flat_C.begin() + i * colsB, flat_C.begin() + (i + 1) * colsB, R[i].begin());
+    }
 
     return R;
 }
-__global__ void matrixVectorMulModKernel(const long long* A, const long long* B, long long* C, int rowsA, int colsA, long long mod) {
-    // 1D grid/block layout since the output is a 1D vector
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (row < rowsA) {
-        unsigned long long sum = 0;
-        for (int j = 0; j < colsA; ++j) {
-            sum += (unsigned long long)A[row * colsA + j] * B[j];
-            // Match the modulo optimization from your original code
-            if (j & 1) sum %= mod;
+#define TILE_SIZE2 256
+__global__ void matrixVectorMulModKernel(const long long* __restrict__ A, const long long* __restrict__ B, long long* __restrict__ C, int rowsA, int colsA, long long mod) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned long long sum = 0;
+
+    // Loop over vector B in TILE_SIZE chunks
+    for (int t = 0; t < (colsA + TILE_SIZE2 - 1) / TILE_SIZE2; ++t) {
+
+        // Allocate shared memory for the chunk of vector B
+        __shared__ long long shared_B[TILE_SIZE2];
+
+        // Let the threads cooperatively load a chunk of B into shared memory
+        int b_idx = t * TILE_SIZE2 + threadIdx.x;
+        if (b_idx < colsA) {
+            shared_B[threadIdx.x] = B[b_idx];
         }
+
+        // Wait for all threads in the block to finish loading shared_B
+        __syncthreads();
+
+        // Compute the partial dot product using the ultra-fast shared memory
+        if (row < rowsA) {
+            int limit = (t + 1) * TILE_SIZE2 > colsA ? colsA - t * TILE_SIZE2 : TILE_SIZE2;
+            for (int j = 0; j < limit; ++j) {
+                sum += (unsigned long long)A[row * colsA + t * TILE_SIZE2 + j] * shared_B[j];
+                if (sum >> 61) sum %= mod; // Deferred modulo trick
+            }
+        }
+
+        // Wait for all threads to finish computing before overwriting shared_B in the next loop
+        __syncthreads();
+    }
+
+    // Write final result to global memory
+    if (row < rowsA) {
         C[row] = sum % mod;
     }
 }
 inline vector<long long> operator*(const vector<vector<long long>>& a, const vector<long long>& b) {
     if (a.empty() || a[0].empty() || b.empty()) return {};
     if (a[0].size() != b.size()) {
-        printf("Matrix Vector Multiplication Error : Matrix and Vector's size do not match\n");
-        exit(1);
+        throw std::invalid_argument("Matrix Vector Multiplication Error: Matrix and Vector's size do not match");
     }
 
-    int rowsA = a.size();
-    int colsA = a[0].size();
+    int rowsA = a.size(), colsA = a[0].size();
 
-    // CPU fallback for small workloads to avoid CUDA launch overhead
+    // CPU fallback for small workloads
     if (rowsA <= 20 && colsA <= 20) {
         vector<long long> R(rowsA, 0);
         for (int i = 0; i < rowsA; ++i) {
             unsigned long long sum = 0;
             for (int j = 0; j < colsA; ++j) {
                 sum += (unsigned long long)a[i][j] * b[j];
-                if (j & 1) sum %= MOD;
+                // Fixed: Apply the fast deferred modulo trick to the CPU as well!
+                if (sum >> 61) sum %= MOD;
             }
             R[i] = sum % MOD;
         }
         return R;
     }
 
-    // Flatten 2D matrix A to 1D
-    vector<long long> flat_A(rowsA * colsA);
+    // Flatten A
+    vector<long long> flat_A(rowsA * colsA), R(rowsA);
     for (int i = 0; i < rowsA; ++i) {
         copy(a[i].begin(), a[i].end(), flat_A.begin() + i * colsA);
     }
 
-    // Memory sizing
     size_t bytesA = rowsA * colsA * sizeof(long long);
     size_t bytesB = colsA * sizeof(long long);
     size_t bytesC = rowsA * sizeof(long long);
 
-    // Allocate Device memory
     long long* d_A, * d_B, * d_C;
-    cudaMalloc(&d_A, bytesA);
-    cudaMalloc(&d_B, bytesB);
-    cudaMalloc(&d_C, bytesC);
 
-    // Copy Host to Device
-    cudaMemcpy(d_A, flat_A.data(), bytesA, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_B, b.data(), bytesB, cudaMemcpyHostToDevice); // b is already flat
+    // Dedicated stream for TBB concurrency
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
 
-    // 1D Thread/Block configuration
-    int threads = 256;
+    // Async memory allocations
+    cudaMallocAsync(&d_A, bytesA, stream);
+    cudaMallocAsync(&d_B, bytesB, stream);
+    cudaMallocAsync(&d_C, bytesC, stream);
+
+    // Async transfers to device
+    cudaMemcpyAsync(d_A, flat_A.data(), bytesA, cudaMemcpyHostToDevice, stream);
+    cudaMemcpyAsync(d_B, b.data(), bytesB, cudaMemcpyHostToDevice, stream);
+
+    // Launch tiled kernel into the stream
+    int threads = TILE_SIZE; // Matches TILE_SIZE for optimal shared memory loading
     int blocks = (rowsA + threads - 1) / threads;
+    matrixVectorMulModKernel << <blocks, threads, 0, stream >> > (d_A, d_B, d_C, rowsA, colsA, MOD);
 
-    // Launch kernel
-    matrixVectorMulModKernel << <blocks, threads >> > (d_A, d_B, d_C, rowsA, colsA, MOD);
+    // Async transfer back to host
+    cudaMemcpyAsync(R.data(), d_C, bytesC, cudaMemcpyDeviceToHost, stream);
 
-    // Copy Device to Host
-    vector<long long> R(rowsA);
-    cudaMemcpy(R.data(), d_C, bytesC, cudaMemcpyDeviceToHost);
+    // CPU waits ONLY for this specific stream to finish
+    cudaStreamSynchronize(stream);
 
-    // Free Device memory
-    cudaFree(d_A);
-    cudaFree(d_B);
-    cudaFree(d_C);
+    // Async cleanup
+    cudaFreeAsync(d_A, stream);
+    cudaFreeAsync(d_B, stream);
+    cudaFreeAsync(d_C, stream);
+    cudaStreamDestroy(stream);
 
     return R;
 }
 inline long long operator * (const vector<long long>& a, const vector<long long>& b) {
     if (a.size() != b.size()) {
-        printf("Vector Dot Product Error : Vector size does not match\n");
-        exit(1);
+        throw std::invalid_argument("Vector Dot Product Error: Vector size does not match");
     }
     unsigned long long sum = 0;
     for (size_t i = 0; i < a.size(); ++i) {
@@ -435,8 +506,7 @@ inline vector<vector<long long>> operator * (const long long a, const vector<vec
 inline vector<vector<long long>> operator + (const vector<vector<long long>>& a, const vector<vector<long long>>& b) {
     if (a.empty() || b.empty() || a[0].empty() || b[0].empty()) return {};
     if (a[0].size() != b[0].size() || a.size() != b.size()) {
-        printf("Matrix Addition Error : Matrix size does not match\n");
-        exit(1);
+        throw std::invalid_argument("Matrix Addition Error: Matrix size does not match");
     }
     int rows = a.size();
     int cols = a[0].size();
@@ -453,8 +523,7 @@ inline vector<vector<long long>> operator + (const vector<vector<long long>>& a,
 inline vector<vector<long long>> operator - (const vector<vector<long long>>& a, const vector<vector<long long>>& b) {
     if (a.empty() || b.empty() || a[0].empty() || b[0].empty()) return {};
     if (a[0].size() != b[0].size() || a.size() != b.size()) {
-        printf("Matrix Subtraction Error : Matrix size does not match\n");
-        exit(1);
+        throw std::invalid_argument("Matrix Subtraction Error: Matrix size does not match");
     }
     int rows = a.size();
     int cols = a[0].size();
@@ -486,8 +555,7 @@ inline vector<vector<long long>> operator | (const vector<vector<long long>>& a,
 }
 inline vector<long long> operator + (const vector<long long>& a, const vector<long long>& b) {
     if (a.size() != b.size()) {
-        printf("Vector Addition Error : Vector size does not match\n");
-        exit(1);
+        throw std::invalid_argument("Vector Addition Error: Vector size does not match");
     }
     vector<long long> R(a.size());
     for (size_t i = 0; i < a.size(); ++i) {
@@ -499,8 +567,7 @@ inline vector<long long> operator + (const vector<long long>& a, const vector<lo
 }
 inline vector<long long> operator - (const vector<long long>& a, const vector<long long>& b) {
     if (a.size() != b.size()) {
-        printf("Vector Subtraction Error : Vector size does not match\n");
-        exit(1);
+        throw std::invalid_argument("Vector Subtraction Error: Vector size does not match");
     }
     vector<long long> R(a.size());
     for (size_t i = 0; i < a.size(); ++i) {
@@ -519,6 +586,11 @@ inline vector<long long> Extended_Euclid(long long a, long long b) {
         r1 = r2;  r2 = r;   s1 = s2;  s2 = s;   t1 = t2;  t2 = t;
     }
     return { r1,s1,t1 };
+}
+__global__ void initIdentityKernel(long long* I, int n) {
+    int r = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (r < n && c < n) I[r * n + c] = (r == c) ? 1 : 0;
 }
 inline vector<vector<long long>> I_n(int n) {
     vector<vector<long long>> I(n, vector<long long>(n, 0));
@@ -557,6 +629,90 @@ inline vector<vector<long long>> matrix_transpose_tiled(const vector<vector<long
     }
     return R;
 }
+inline vector<vector<long long>> matrix_power_gpu(const vector<vector<long long>>& a, unsigned long long p) {
+    if (a.empty() || a[0].empty()) return {};
+    int N = a.size();
+
+    // CPU fallback for small matrices (avoids GPU launch latency)
+    if (N <= 20) {
+        vector<vector<long long>> res = I_n(N); // Your existing identity function
+        vector<vector<long long>> base = a;
+        while (p) {
+            if (p & 1) res = res * base; // Uses the CPU fallback inside operator*
+            p >>= 1;
+            if (!p) break;
+            base = base * base;
+        }
+        return res;
+    }
+
+    // Flatten input matrix
+    vector<long long> flat_a(N * N);
+    for (int i = 0; i < N; ++i) {
+        copy(a[i].begin(), a[i].end(), flat_a.begin() + i * N);
+    }
+
+    size_t bytes = N * N * sizeof(long long);
+
+    // Dedicated stream for TBB concurrency
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
+    long long* d_A, * d_res, * d_temp;
+    cudaMallocAsync(&d_A, bytes, stream);
+    cudaMallocAsync(&d_res, bytes, stream);
+    cudaMallocAsync(&d_temp, bytes, stream); // Workspace buffer
+
+    // Copy base matrix to device
+    cudaMemcpyAsync(d_A, flat_a.data(), bytes, cudaMemcpyHostToDevice, stream);
+
+    // Initialize d_res as Identity Matrix directly on the GPU
+    dim3 threads(16, 16);
+    dim3 blocks((N + 15) / 16, (N + 15) / 16);
+    initIdentityKernel << <blocks, threads, 0, stream >> > (d_res, N);
+
+    // ---------------------------------------------------------
+    // THE KERNEL LOOP (Zero PCIe Transfers here!)
+    // ---------------------------------------------------------
+    while (p) {
+        if (p & 1) {
+            // d_temp = d_res * d_A
+            matrixMulModTiledKernel << <blocks, threads, 0, stream >> > (d_res, d_A, d_temp, N, N, N, MOD);
+            // Swap pointers: d_res now holds the new result, d_temp becomes the free buffer
+            std::swap(d_res, d_temp);
+        }
+        p >>= 1;
+        if (!p) break;
+
+        // d_temp = d_A * d_A
+        matrixMulModTiledKernel << <blocks, threads, 0, stream >> > (d_A, d_A, d_temp, N, N, N, MOD);
+        // Swap pointers: d_A now holds the squared matrix, d_temp becomes the free buffer
+        std::swap(d_A, d_temp);
+    }
+
+    // ---------------------------------------------------------
+    // Retrieve Final Result
+    // ---------------------------------------------------------
+    vector<long long> flat_res(N * N);
+
+    // We only copy memory BACK to the CPU when the entire exponentiation is done
+    cudaMemcpyAsync(flat_res.data(), d_res, bytes, cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream); // CPU waits here
+
+    // Async cleanup
+    cudaFreeAsync(d_A, stream);
+    cudaFreeAsync(d_res, stream);
+    cudaFreeAsync(d_temp, stream);
+    cudaStreamDestroy(stream);
+
+    // Reconstruct 2D matrix
+    vector<vector<long long>> res(N, vector<long long>(N));
+    for (int i = 0; i < N; ++i) {
+        copy(flat_res.begin() + i * N, flat_res.begin() + (i + 1) * N, res[i].begin());
+    }
+
+    return res;
+}
 inline vector<vector<long long>> matrix_power(vector<vector<long long>> a, unsigned long long n) {
     vector<vector<long long>> res = I_n(a.size());
     while (n) {
@@ -573,8 +729,7 @@ inline void matrix_chop(vector<vector<vector<long long>>>& M, const vector<vecto
     for (size_t i = 0; i < list.size(); ++i) {
         size_t block_size = list[i];
         if (p + block_size > F.size() || p + block_size > F[0].size()) {
-            ::printf("Matrix Chop Error : Block bounds exceed matrix dimensions\n");
-            ::exit(1);
+            throw std::invalid_argument("Matrix Chop Error: Block bounds exceed matrix dimensions");
         }
 
         vector<vector<long long>> block(block_size, vector<long long>(block_size));
@@ -600,8 +755,7 @@ inline vector<vector<long long>> matrix_partial_multiply(const vector<vector<lon
     for (size_t i = 0; i < list.size(); ++i) {
         size_t block_size = list[i];
         if (p + block_size > n || p + block_size > B[0].size()) {
-            printf("Matrix Partial Multiply Error : Block bounds exceed matrix dimensions\n");
-            exit(1);
+            throw std::invalid_argument("Matrix Partial Multiply Error: Block bounds exceed matrix dimensions");
         }
 
         vector<vector<long long>> B_block_T(block_size, vector<long long>(block_size));
@@ -626,105 +780,267 @@ inline vector<vector<long long>> matrix_partial_multiply(const vector<vector<lon
     return R;
 }
 
-// Kernel to swap two rows in parallel
-__global__ void swapRowsKernel(long long* A, int n, int row1, int row2) {
-    int c = blockIdx.x * blockDim.x + threadIdx.x;
-    if (c < n) {
-        long long temp = A[row1 * n + c];
-        A[row1 * n + c] = A[row2 * n + c];
-        A[row2 * n + c] = temp;
+
+
+
+
+// Device-side modular inverse
+__device__ long long inverse_gpu(long long a, long long m) {
+    long long m0 = m, t, q;
+    long long x0 = 0, x1 = 1;
+    if (m == 1) return 0;
+    while (a > 1) {
+        q = a / m; t = m; m = a % m; a = t;
+        t = x0; x0 = x1 - q * x0; x1 = t;
     }
+    return x1 < 0 ? x1 + m0 : x1;
 }
 
-// Kernel to multiply a row by the pivot's modular inverse
-__global__ void normalizeRowKernel(long long* A, int n, int row, int col, long long inv, long long mod) {
-    int c = col + blockIdx.x * blockDim.x + threadIdx.x;
-    if (c < n) {
-        A[row * n + c] = (A[row * n + c] * inv) % mod;
+// ------------------------------------------------------------------
+// 1. Pivot Search 
+// ------------------------------------------------------------------
+__global__ void findPivotKernel(const long long* A, int m, int cols_A, int static_row, const int* d_dynamic_row, int col, int* out_pivot_row, long long* out_pivot_val, const int* d_info) {
+    if (d_info != nullptr && *d_info != 0) return;
+
+    // Use dynamic row if provided (Rank/NullSpace), otherwise static (Inverse/Det)
+    int current_row = (d_dynamic_row != nullptr) ? *d_dynamic_row : static_row;
+
+    __shared__ int min_row;
+    if (threadIdx.x == 0) min_row = m;
+    __syncthreads();
+
+    if (current_row < m) {
+        for (int r = current_row + threadIdx.x; r < m; r += blockDim.x) {
+            if (A[r * cols_A + col] != 0) {
+                atomicMin(&min_row, r);
+            }
+        }
     }
-}
+    __syncthreads();
 
-// Kernel to eliminate all rows below the current pivot row
-__global__ void eliminateRowsKernel(long long* A, int m, int n, int pivot_row, int col, long long mod) {
-    // Grid maps: X -> columns (starting from col), Y -> rows (starting from pivot_row + 1)
-    int r = (pivot_row + 1) + blockIdx.y * blockDim.y + threadIdx.y;
-    int c = col + blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (r < m && c < n) {
-        long long factor = A[r * n + col];
-        if (factor != 0) { // Optimization: Skip if already 0
-            long long pivot_val = A[pivot_row * n + c];
-            long long sub = (pivot_val * factor) % mod;
-            long long new_val = A[r * n + c] - sub;
-
-            if (new_val < 0) new_val += mod;
-            A[r * n + c] = new_val;
+    if (threadIdx.x == 0) {
+        *out_pivot_row = min_row;
+        if (out_pivot_val != nullptr) {
+            if (min_row < m) *out_pivot_val = A[min_row * cols_A + col];
+            else *out_pivot_val = 0;
         }
     }
 }
+
+// ------------------------------------------------------------------
+// 2. Row Swap 
+// ------------------------------------------------------------------
+template <bool HAS_AUG>
+__global__ void swapRowsKernel(long long* A, long long* B, int m, int cols_A, int cols_B, int static_row, const int* d_dynamic_row, const int* d_pivot_row, const int* d_info) {
+    if (d_info != nullptr && *d_info != 0) return;
+
+    int pivot_row = *d_pivot_row;
+    if (pivot_row == m) return; // No pivot found in this column, skip
+
+    int current_row = (d_dynamic_row != nullptr) ? *d_dynamic_row : static_row;
+    if (current_row == pivot_row) return; // Already in place
+
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c < cols_A) {
+        long long t = A[current_row * cols_A + c];
+        A[current_row * cols_A + c] = A[pivot_row * cols_A + c];
+        A[pivot_row * cols_A + c] = t;
+    }
+    if (HAS_AUG && c < cols_B) {
+        long long t = B[current_row * cols_B + c];
+        B[current_row * cols_B + c] = B[pivot_row * cols_B + c];
+        B[pivot_row * cols_B + c] = t;
+    }
+}
+
+// ------------------------------------------------------------------
+// 3. Normalize Pivot Row 
+// ------------------------------------------------------------------
+template <bool HAS_AUG>
+__global__ void normalizePivotRowKernel(long long* A, long long* B, int m, int cols_A, int cols_B, int static_row, const int* d_dynamic_row, int pivot_col, const int* d_pivot_row, long long mod, const long long* d_pivot_val, const int* d_info) {
+    if (d_info != nullptr && *d_info != 0) return;
+    if (*d_pivot_row == m) return;
+
+    int current_row = (d_dynamic_row != nullptr) ? *d_dynamic_row : static_row;
+
+    __shared__ long long inv;
+    if (threadIdx.x == 0) {
+        // [FIX]: Read the safely isolated pivot value. No read-after-write hazard!
+        inv = inverse_gpu(*d_pivot_val, mod);
+    }
+    __syncthreads();
+
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c < cols_A) {
+        A[current_row * cols_A + c] = (A[current_row * cols_A + c] * inv) % mod;
+    }
+    if (HAS_AUG && c < cols_B) {
+        B[current_row * cols_B + c] = (B[current_row * cols_B + c] * inv) % mod;
+    }
+}
+
+// ------------------------------------------------------------------
+// 4. Compute Multipliers 
+// ------------------------------------------------------------------
+__global__ void computeMultipliersKernel(const long long* A, int m, int cols_A, int static_row, const int* d_dynamic_row, int pivot_col, const int* d_pivot_row, long long mod, long long* multipliers, bool both_directions, const int* d_info) {
+    if (d_info != nullptr && *d_info != 0) return;
+    if (*d_pivot_row == m) return; // No pivot found, skip
+
+    int current_row = (d_dynamic_row != nullptr) ? *d_dynamic_row : static_row;
+
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j < m) {
+        if (j == current_row || (!both_directions && j < current_row)) {
+            multipliers[j] = 0;
+        }
+        else {
+            long long val = A[j * cols_A + pivot_col];
+            multipliers[j] = (val == 0) ? 0 : (mod - val) % mod;
+        }
+    }
+}
+
+// ------------------------------------------------------------------
+// 5. Eliminate Rows 
+// ------------------------------------------------------------------
+template <bool HAS_AUG>
+__global__ void eliminateRowsKernel(long long* A, long long* B, int m, int cols_A, int cols_B, int static_row, const int* d_dynamic_row, const int* d_pivot_row, const long long* multipliers, long long mod, const int* d_info) {
+    if (d_info != nullptr && *d_info != 0) return;
+    if (*d_pivot_row == m) return; // No pivot found, skip
+
+    int current_row = (d_dynamic_row != nullptr) ? *d_dynamic_row : static_row;
+
+    int r = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (r < m) {
+        long long mul = multipliers[r];
+        if (mul != 0) {
+            if (c < cols_A) {
+                A[r * cols_A + c] = (A[r * cols_A + c] + A[current_row * cols_A + c] * mul) % mod;
+            }
+            if (HAS_AUG && c < cols_B) {
+                B[r * cols_B + c] = (B[r * cols_B + c] + B[current_row * cols_B + c] * mul) % mod;
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------
+// HELPER: Update State for Determinant / Inverse
+// ------------------------------------------------------------------
+__global__ void updateDetInfoKernel(const int* d_pivot_row, const long long* d_pivot_val, int static_row, int m, long long* d_det, int* d_info, long long mod) {
+    if (d_info != nullptr && *d_info != 0) return;
+    if (threadIdx.x != 0 || blockIdx.x != 0) return;
+
+    if (*d_pivot_row == m) {
+        if (d_info != nullptr) *d_info = 1; // Flag Singular
+        if (d_det != nullptr) *d_det = 0;   // Det is 0
+    }
+    else if (d_det != nullptr) {
+        if (*d_pivot_row != static_row) {
+            *d_det = (mod - *d_det) % mod;  // Swap flips sign
+        }
+        *d_det = (*d_det * (*d_pivot_val)) % mod;
+    }
+}
+
+// ------------------------------------------------------------------
+// HELPER: Update State for Rank / Null Space
+// ------------------------------------------------------------------
+__global__ void updateRankStateKernel(const int* d_pivot_row, int m, int col, int* d_dynamic_row, int* d_piv_array) {
+    // Only increment row and record pivot if a valid pivot was found
+    if (threadIdx.x != 0 || blockIdx.x != 0) return;
+    if (*d_pivot_row < m) {
+        if (d_piv_array != nullptr) {
+            d_piv_array[*d_dynamic_row] = col;
+        }
+        (*d_dynamic_row)++;
+    }
+}
+
+
+
+
 inline size_t matrix_rank_gpu(const vector<vector<long long>>& A_2D) {
     if (A_2D.empty() || A_2D[0].empty()) return 0;
+    int m = A_2D.size(), n = A_2D[0].size();
 
-    int m = A_2D.size();
-    int n = A_2D[0].size();
-    size_t bytes = m * n * sizeof(long long);
-
-    // Allocate Unified Memory (accessible by both CPU and GPU)
-    long long* d_A = nullptr;
-    cudaMallocManaged(&d_A, bytes);
-
-    // Copy the 2D vector data into our Unified Memory buffer
-    for (int i = 0; i < m; ++i)
-        copy(A_2D[i].begin(), A_2D[i].end(), d_A + i * n);
-
-    size_t rank = 0;
-    int row = 0; // Tracks the current pivot row
-
-    for (int col = 0; col < n && row < m; ++col) {
-        // 1. Pivot Search (CPU-side on Unified Memory)
-        // We must sync the GPU first to ensure previous eliminations are complete
-        cudaDeviceSynchronize();
-
-        int pivot_row = row;
-        while (pivot_row < m && d_A[pivot_row * n + col] == 0) {
-            pivot_row++;
-        }
-
-        if (pivot_row == m) continue; // All zeros in this column below 'row'
-
-        // 2. Row Swapping (GPU-side)
-        if (pivot_row != row) {
-            int threads = 256;
-            int blocks = (n + threads - 1) / threads;
-            swapRowsKernel << <blocks, threads >> > (d_A, n, row, pivot_row);
-        }
-
-        // 3. Row Normalization (GPU-side)
-        // Calculate the inverse on the CPU using your existing 'inverse()' function
-        long long inv = inverse(d_A[row * n + col]);
-
-        int threads_norm = 256;
-        int blocks_norm = ((n - col) + threads_norm - 1) / threads_norm;
-        normalizeRowKernel << <blocks_norm, threads_norm >> > (d_A, n, row, col, inv, MOD);
-
-        // 4. Row Elimination (GPU-side)
-        int active_rows = m - (row + 1);
-        int active_cols = n - col;
-
-        if (active_rows > 0 && active_cols > 0) {
-            dim3 threadsPerBlock(16, 16);
-            dim3 numBlocks((active_cols + 15) / 16, (active_rows + 15) / 16);
-
-            eliminateRowsKernel << <numBlocks, threadsPerBlock >> > (d_A, m, n, row, col, MOD);
-        }
-
-        row++;
-        rank++;
+    vector<long long> flat_A(m * n);
+    for (int i = 0; i < m; ++i) {
+        copy(A_2D[i].begin(), A_2D[i].end(), flat_A.begin() + i * n);
     }
 
-    // Wait for final GPU operations to finish before freeing memory
-    cudaDeviceSynchronize();
-    cudaFree(d_A);
+    cudaStream_t stream;
+    cudaStreamCreate(&stream); // Independent stream
+
+    long long* d_A, * d_mults, * d_pivot_val; // [FIX]: Added d_pivot_val
+    int* d_pivot_row, * d_row;
+    int* h_rank;
+
+    // Async memory allocations
+    cudaMallocAsync(&d_A, m * n * sizeof(long long), stream);
+    cudaMallocAsync(&d_mults, m * sizeof(long long), stream);
+    cudaMallocAsync(&d_pivot_row, sizeof(int), stream);
+    cudaMallocAsync(&d_pivot_val, sizeof(long long), stream); // [FIX]: Allocate pivot value isolator
+
+    // NEW: Device-side row counter to break CPU dependency
+    cudaMallocAsync(&d_row, sizeof(int), stream);
+    cudaMallocHost(&h_rank, sizeof(int)); // Pinned memory
+
+    // Initialize state
+    cudaMemsetAsync(d_row, 0, sizeof(int), stream);
+    cudaMemcpyAsync(d_A, flat_A.data(), m * n * sizeof(long long), cudaMemcpyHostToDevice, stream);
+
+    int threads1D = 256;
+    int blocks1D = (n + threads1D - 1) / threads1D;
+    int blocksMult = (m + threads1D - 1) / threads1D;
+    dim3 threads2D(16, 16), blocks2D((n + 15) / 16, (m + 15) / 16);
+
+    // ENTIRE LOOP QUEUED ASYNCHRONOUSLY
+    // CPU runs through this in microseconds. If d_row reaches m, 
+    // the kernels gracefully short-circuit without crashing.
+    for (int col = 0; col < n; ++col) {
+        // [FIX]: Reset pivot row to -1 to prevent phantom pivots on free columns
+        cudaMemsetAsync(d_pivot_row, -1, sizeof(int), stream);
+
+        // 1. Find pivot using dynamic d_row, saving value to d_pivot_val
+        findPivotKernel << <1, 256, 0, stream >> > (
+            d_A, m, n, 0, d_row, col, d_pivot_row, d_pivot_val, nullptr);
+
+        // 2. Math kernels conditionally execute based on d_pivot_row
+        swapRowsKernel<false> << <blocks1D, threads1D, 0, stream >> > (
+            d_A, nullptr, m, n, 0, 0, d_row, d_pivot_row, nullptr);
+
+        // [FIX]: Pass d_pivot_val so all blocks read the original uncorrupted value
+        normalizePivotRowKernel<false> << <blocks1D, threads1D, 0, stream >> > (
+            d_A, nullptr, m, n, 0, 0, d_row, col, d_pivot_row, MOD, d_pivot_val, nullptr);
+
+        computeMultipliersKernel << <blocksMult, threads1D, 0, stream >> > (
+            d_A, m, n, 0, d_row, col, d_pivot_row, MOD, d_mults, false, nullptr);
+
+        eliminateRowsKernel<false> << <blocks2D, threads2D, 0, stream >> > (
+            d_A, nullptr, m, n, 0, 0, d_row, d_pivot_row, d_mults, MOD, nullptr);
+
+        // 3. Increment d_row AT THE END of the iteration if a pivot was successfully found
+        updateRankStateKernel << <1, 1, 0, stream >> > (
+            d_pivot_row, m, col, d_row, nullptr);
+    }
+
+    // ONLY SYNC ONCE AT THE VERY END to retrieve the rank (which is exactly the final d_row value)
+    cudaMemcpyAsync(h_rank, d_row, sizeof(int), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+
+    size_t rank = *h_rank;
+
+    // Cleanup asynchronously
+    cudaFreeAsync(d_A, stream);
+    cudaFreeAsync(d_mults, stream);
+    cudaFreeAsync(d_pivot_row, stream);
+    cudaFreeAsync(d_pivot_val, stream); // [FIX]: Free isolated pivot value
+    cudaFreeAsync(d_row, stream);
+    cudaFreeHost(h_rank);
+    cudaStreamDestroy(stream);
 
     return rank;
 }
@@ -768,20 +1084,112 @@ inline size_t matrix_rank(const vector<vector<long long>>& A_2D) {
     }
     return rank;
 }
+inline vector<vector<long long>> matrix_inverse_gpu(const vector<vector<long long>>& A_2D) {
+    int n = A_2D.size();
+    size_t bytes = n * n * sizeof(long long);
+
+    // Flat arrays
+    vector<long long> flat_A(n * n), flat_I(n * n);
+    for (int i = 0; i < n; ++i) {
+        copy(A_2D[i].begin(), A_2D[i].end(), flat_A.begin() + i * n);
+    }
+
+    // 1. Create independent stream for this TBB thread
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
+    long long* d_A, * d_I, * d_mults, * d_pivot_val; // [FIX]: Added d_pivot_val
+    int* d_pivot, * d_info;
+
+    // 2. Async Allocations (No thread blocking, extremely fast)
+    cudaMallocAsync(&d_A, bytes, stream);
+    cudaMallocAsync(&d_I, bytes, stream);
+    cudaMallocAsync(&d_mults, n * sizeof(long long), stream);
+    cudaMallocAsync(&d_pivot, sizeof(int), stream);
+    cudaMallocAsync(&d_info, sizeof(int), stream);
+    cudaMallocAsync(&d_pivot_val, sizeof(long long), stream); // [FIX]: Allocate d_pivot_val
+
+    cudaMemcpyAsync(d_A, flat_A.data(), bytes, cudaMemcpyHostToDevice, stream);
+    cudaMemsetAsync(d_info, 0, sizeof(int), stream);
+
+    // Concise thread configs
+    dim3 b1D((n + 255) / 256), t1D(256);
+    dim3 b2D((n + 15) / 16, (n + 15) / 16), t2D(16, 16);
+
+    initIdentityKernel << <b2D, t2D, 0, stream >> > (d_I, n);
+
+    // 3. ENTIRE PIPELINE QUEUED ASYNCHRONOUSLY
+    for (int p = 0; p < n; ++p) {
+        // [FIX]: Pass d_pivot_val to capture the pivot mathematically safely
+        findPivotKernel << <1, 256, 0, stream >> > (d_A, n, n, p, nullptr, p, d_pivot, d_pivot_val, d_info);
+
+        // Optional: Pass it to DetInfoKernel as well for consistency
+        updateDetInfoKernel << <1, 1, 0, stream >> > (d_pivot, d_pivot_val, p, n, nullptr, d_info, MOD);
+
+        swapRowsKernel<true> << <b1D, t1D, 0, stream >> > (d_A, d_I, n, n, n, p, nullptr, d_pivot, d_info);
+
+        // [FIX]: Pass d_pivot_val into the normalizer to prevent read-after-write block hazards
+        normalizePivotRowKernel<true> << <b1D, t1D, 0, stream >> > (d_A, d_I, n, n, n, p, nullptr, p, d_pivot, MOD, d_pivot_val, d_info);
+
+        computeMultipliersKernel << <b1D, t1D, 0, stream >> > (d_A, n, n, p, nullptr, p, d_pivot, MOD, d_mults, true, d_info);
+        eliminateRowsKernel<true> << <b2D, t2D, 0, stream >> > (d_A, d_I, n, n, n, p, nullptr, d_pivot, d_mults, MOD, d_info);
+    }
+
+    // Standard stack variable, no expensive OS allocations needed
+    int h_info_val = 0;
+
+    // 4. Fetch the result and the error flag
+    // (Copying to pageable memory blocks the host, which is fine since we sync immediately after)
+    cudaMemcpyAsync(&h_info_val, d_info, sizeof(int), cudaMemcpyDeviceToHost, stream);
+    cudaMemcpyAsync(flat_I.data(), d_I, bytes, cudaMemcpyDeviceToHost, stream);
+
+    // 5. The ONLY synchronization point
+    cudaStreamSynchronize(stream);
+
+    // 6. Queue Async Cleanups BEFORE throwing any exceptions
+    cudaFreeAsync(d_A, stream);
+    cudaFreeAsync(d_I, stream);
+    cudaFreeAsync(d_mults, stream);
+    cudaFreeAsync(d_pivot, stream);
+    cudaFreeAsync(d_info, stream);
+    cudaFreeAsync(d_pivot_val, stream); // [FIX]: Cleanup new pointer
+    cudaStreamDestroy(stream);
+
+    // 7. Safe Error Check
+    if (h_info_val == 1) {
+        printf("Matrix is singular\n");
+        throw std::invalid_argument("Matrix is singular");
+    }
+
+    // Construct final output
+    vector<vector<long long>> I_out(n, vector<long long>(n));
+    for (int i = 0; i < n; ++i) {
+        copy(flat_I.begin() + i * n, flat_I.begin() + (i + 1) * n, I_out[i].begin());
+    }
+
+    return I_out;
+}
 inline vector<vector<long long>> matrix_inverse(const vector<vector<long long>>& A_2D) {
     if (A_2D.empty() || A_2D.size() != A_2D.front().size()) {
-        printf("Matrix Inversion Error : Matrix is not square\n\n");
-        exit(1);
+        throw std::invalid_argument("Matrix Inversion Error: Matrix is not square");
     }
+
     size_t n = A_2D.size();
     vector<long long> A(n * n);
     vector<long long> I(n * n, 0);
-    for (size_t i = 0; i < n; ++i) {
-        copy(A_2D[i].begin(), A_2D[i].end(), A.begin() + i * n);
-        I[i * n + i] = 1; // Initialize Identity matrix concurrently
-    }
 
-    for (size_t p = 0; p < n - 1; ++p) {
+    // 1. PARALLELIZE INITIALIZATION
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, n),
+        [&](const tbb::blocked_range<size_t>& r) {
+            for (size_t i = r.begin(); i != r.end(); ++i) {
+                copy(A_2D[i].begin(), A_2D[i].end(), A.begin() + i * n);
+                I[i * n + i] = 1;
+            }
+        });
+
+    // 2. FUSE FORWARD AND BACKWARD ELIMINATION
+    for (size_t p = 0; p < n; ++p) {
+        // Pivot search (Sequential, as we break early on success)
         if (A[p * n + p] == 0) {
             bool found = false;
             for (size_t j = p + 1; j < n; ++j) {
@@ -793,56 +1201,127 @@ inline vector<vector<long long>> matrix_inverse(const vector<vector<long long>>&
                 }
             }
             if (!found) {
-                printf("Matrix Inversion Error : Matrix is singular\n\n");
-                exit(1);
+                throw std::invalid_argument("Matrix Inversion Error: Matrix is singular");
             }
         }
 
         long long inv_pivot = inverse(A[p * n + p]);
-        tbb::parallel_for(tbb::blocked_range<size_t>(p + 1, n),
+
+        // Eliminate ALL other rows (both above and below the pivot) simultaneously
+        tbb::parallel_for(tbb::blocked_range<size_t>(0, n),
             [&](const tbb::blocked_range<size_t>& r) {
                 for (size_t j = r.begin(); j != r.end(); ++j) {
-                    long long mul = (MOD - A[j * n + p]) * inv_pivot % MOD;
-                    for (size_t k = p; k < n; ++k)    // Skip zeros before 'p'
+                    if (j == p) continue; // Skip the pivot row itself
+
+                    long long val = A[j * n + p];
+                    if (val == 0) continue; // Skip if already zero (saves math operations)
+
+                    long long mul = (MOD - val) * inv_pivot % MOD;
+
+                    for (size_t k = p; k < n; ++k)
                         A[j * n + k] = (A[j * n + k] + A[p * n + k] * mul) % MOD;
+
                     for (size_t k = 0; k < n; ++k)
                         I[j * n + k] = (I[j * n + k] + I[p * n + k] * mul) % MOD;
                 }
             });
     }
 
-    if (n > 0 && A[(n - 1) * n + (n - 1)] == 0) {
-        printf("Matrix Inversion Error : Matrix is singular\n\n");
-        exit(1);
-    }
-    for (int p = n - 1; p > 0; --p) {
-        long long inv_pivot = inverse(A[p * n + p]);
-        tbb::parallel_for(tbb::blocked_range<size_t>(0, p),
-            [&](const tbb::blocked_range<size_t>& r) {
-                for (size_t j = r.begin(); j != r.end(); ++j) {
-                    long long mul = (MOD - A[j * n + p]) * inv_pivot % MOD;
-                    A[j * n + p] = (A[j * n + p] + A[p * n + p] * mul) % MOD;   // Skip zeros entirely, only process column 'p'
-                    for (size_t k = 0; k < n; ++k)
-                        I[j * n + k] = (I[j * n + k] + I[p * n + k] * mul) % MOD;
-                }
-            });
-    }
-
+    // 3. DIAGONAL NORMALIZATION (Extract output directly)
     vector<vector<long long>> I_out(n, vector<long long>(n));
     tbb::parallel_for(tbb::blocked_range<size_t>(0, n),
         [&](const tbb::blocked_range<size_t>& r) {
             for (size_t i = r.begin(); i != r.end(); ++i) {
-                long long t = inverse(A[i * n + i]);
-                for (size_t j = 0; j < n; ++j)
+                long long t = inverse(A[i * n + i]); // The diagonal element
+                for (size_t j = 0; j < n; ++j) {
                     I_out[i][j] = (I[i * n + j] * t) % MOD;
+                }
             }
         });
+
     return I_out;
+}
+inline long long matrix_determinant_gpu(const vector<vector<long long>>& A_2D) {
+    if (A_2D.empty() || A_2D.size() != A_2D.front().size()) {
+        throw std::invalid_argument("Matrix determinant Error: Matrix is not square");
+    }
+
+    int n = A_2D.size();
+    vector<long long> flat_A(n * n);
+    for (int i = 0; i < n; ++i) {
+        copy(A_2D[i].begin(), A_2D[i].end(), flat_A.begin() + i * n);
+    }
+
+    // 1. Create a dedicated Stream for this thread
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
+    long long* d_A, * d_mults, * d_pivot_val, * d_det;
+    int* d_pivot_row, * d_info;
+
+    // 2. Async Device Allocations (Non-blocking)
+    cudaMallocAsync(&d_A, n * n * sizeof(long long), stream);
+    cudaMallocAsync(&d_mults, n * sizeof(long long), stream);
+    cudaMallocAsync(&d_pivot_row, sizeof(int), stream);
+    cudaMallocAsync(&d_pivot_val, sizeof(long long), stream);
+
+    // Allocate state trackers on the device
+    cudaMallocAsync(&d_det, sizeof(long long), stream);
+    cudaMallocAsync(&d_info, sizeof(int), stream);
+
+    // Initialize state trackers
+    long long h_det_init = 1;
+    cudaMemcpyAsync(d_det, &h_det_init, sizeof(long long), cudaMemcpyHostToDevice, stream);
+    cudaMemsetAsync(d_info, 0, sizeof(int), stream);
+
+    // 3. Async Copy to Device
+    cudaMemcpyAsync(d_A, flat_A.data(), n * n * sizeof(long long), cudaMemcpyHostToDevice, stream);
+
+    int t1D = 256, b1D = (n + t1D - 1) / t1D;
+    dim3 t2D(16, 16), b2D((n + 15) / 16, (n + 15) / 16);
+
+    // 4. QUEUE ALL KERNELS ASYNCHRONOUSLY
+    for (int p = 0; p < n; ++p) {
+        // Find the pivot and write it to device pointers
+        findPivotKernel << <1, 256, 0, stream >> > (d_A, n, n, p, nullptr, p, d_pivot_row, d_pivot_val, d_info);
+
+        // Update determinant and singularity flag instantly on the GPU
+        updateDetInfoKernel << <1, 1, 0, stream >> > (d_pivot_row, d_pivot_val, p, n, d_det, d_info, MOD);
+
+        // Swap rows if needed (Short-circuits if d_info == 1 or d_pivot_row == m)
+        swapRowsKernel<false> << <b1D, t1D, 0, stream >> > (d_A, nullptr, n, n, 0, p, nullptr, d_pivot_row, d_info);
+
+        // CPU can still safely evaluate loop boundaries since 'p' and 'n' are strictly CPU constants
+        if (p == n - 1) break;
+
+        // Normalize and eliminate
+        // [FIX]: Added d_pivot_val before d_info to match the updated kernel signature!
+        normalizePivotRowKernel<false> << <b1D, t1D, 0, stream >> > (d_A, nullptr, n, n, 0, p, nullptr, p, d_pivot_row, MOD, d_pivot_val, d_info);
+
+        computeMultipliersKernel << <b1D, t1D, 0, stream >> > (d_A, n, n, p, nullptr, p, d_pivot_row, MOD, d_mults, false, d_info);
+        eliminateRowsKernel<false> << <b2D, t2D, 0, stream >> > (d_A, nullptr, n, n, 0, p, nullptr, d_pivot_row, d_mults, MOD, d_info);
+    }
+
+    // 5. One single synchronization point at the end
+    long long final_det = 0;
+    cudaMemcpyAsync(&final_det, d_det, sizeof(long long), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+
+    // 6. Async Device Cleanup
+    cudaFreeAsync(d_A, stream);
+    cudaFreeAsync(d_mults, stream);
+    cudaFreeAsync(d_pivot_row, stream);
+    cudaFreeAsync(d_pivot_val, stream);
+    cudaFreeAsync(d_det, stream);
+    cudaFreeAsync(d_info, stream);
+
+    cudaStreamDestroy(stream);
+
+    return final_det;
 }
 inline long long matrix_determinant(const vector<vector<long long>>& A_2D) {
     if (A_2D.empty() || A_2D.size() != A_2D.front().size()) {
-        printf("Matrix determinant Error : Matrix is not square\n\n");
-        exit(1);
+        throw std::invalid_argument("Matrix determinant Error: Matrix is not square");
     }
     size_t n = A_2D.size();
     vector<long long> A(n * n);
@@ -880,6 +1359,140 @@ inline long long matrix_determinant(const vector<vector<long long>>& A_2D) {
             });
     }
     return det;
+}
+inline vector<vector<long long>> Null_Space_gpu(const vector<vector<long long>>& A_2D, bool Orth) {
+    if (A_2D.empty() || A_2D[0].empty()) return {};
+
+    int m = A_2D.size(), n = A_2D[0].size();
+    vector<long long> flat_A(m * n);
+    for (int i = 0; i < m; ++i) copy(A_2D[i].begin(), A_2D[i].end(), flat_A.begin() + i * n);
+
+    // ---------------------------------------------------------
+    // PHASE 1: GPU RREF (100% Asynchronous Pipeline)
+    // ---------------------------------------------------------
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
+    long long* d_A, * d_mults, * d_pivot_val;
+    int* d_pivot_row, * d_dynamic_row, * d_piv_array;
+
+    // Use standard stack/heap allocations instead of slow cudaMallocHost
+    int h_rank = 0;
+    vector<int> h_piv_array(n, 0);
+
+    // Async Device Allocations
+    cudaMallocAsync(&d_A, m * n * sizeof(long long), stream);
+    cudaMallocAsync(&d_mults, m * sizeof(long long), stream);
+    cudaMallocAsync(&d_pivot_row, sizeof(int), stream);
+    cudaMallocAsync(&d_dynamic_row, sizeof(int), stream);
+    cudaMallocAsync(&d_piv_array, n * sizeof(int), stream);
+    cudaMallocAsync(&d_pivot_val, sizeof(long long), stream); // [FIX]: Isolate pivot value
+
+    // Initial copies and setups
+    cudaMemcpyAsync(d_A, flat_A.data(), m * n * sizeof(long long), cudaMemcpyHostToDevice, stream);
+    cudaMemsetAsync(d_dynamic_row, 0, sizeof(int), stream);
+
+    int threads = 256;
+    dim3 threads2D(16, 16), blocks2D((n + 15) / 16, (m + 15) / 16);
+    dim3 blocks1D_cols((n + threads - 1) / threads);
+    dim3 blocks1D_rows((m + threads - 1) / threads);
+
+    // Enqueue kernels asynchronously
+    for (int col = 0; col < n; ++col) {
+        // [FIX]: Prevent "Phantom Pivots" by resetting to -1 before searching
+        cudaMemsetAsync(d_pivot_row, -1, sizeof(int), stream);
+
+        // [FIX]: Pass d_pivot_val to store the original pivot value safely
+        findPivotKernel << <1, 256, 0, stream >> > (d_A, m, n, 0, d_dynamic_row, col, d_pivot_row, d_pivot_val, nullptr);
+
+        swapRowsKernel<false> << <blocks1D_cols, threads, 0, stream >> > (d_A, nullptr, m, n, 0, 0, d_dynamic_row, d_pivot_row, nullptr);
+
+        // [FIX]: Pass d_pivot_val so all blocks read the original uncorrupted value
+        normalizePivotRowKernel<false> << <blocks1D_cols, threads, 0, stream >> > (d_A, nullptr, m, n, 0, 0, d_dynamic_row, col, d_pivot_row, MOD, d_pivot_val, nullptr);
+
+        computeMultipliersKernel << <blocks1D_rows, threads, 0, stream >> > (d_A, m, n, 0, d_dynamic_row, col, d_pivot_row, MOD, d_mults, true, nullptr);
+
+        eliminateRowsKernel<false> << <blocks2D, threads2D, 0, stream >> > (d_A, nullptr, m, n, 0, 0, d_dynamic_row, d_pivot_row, d_mults, MOD, nullptr);
+
+        updateRankStateKernel << <1, 1, 0, stream >> > (d_pivot_row, m, col, d_dynamic_row, d_piv_array);
+    }
+
+    // Copy back to standard host memory and synchronize
+    cudaMemcpyAsync(flat_A.data(), d_A, m * n * sizeof(long long), cudaMemcpyDeviceToHost, stream);
+    cudaMemcpyAsync(&h_rank, d_dynamic_row, sizeof(int), cudaMemcpyDeviceToHost, stream);
+    cudaMemcpyAsync(h_piv_array.data(), d_piv_array, n * sizeof(int), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+
+    // Cleanup Async
+    cudaFreeAsync(d_A, stream);
+    cudaFreeAsync(d_mults, stream);
+    cudaFreeAsync(d_pivot_row, stream);
+    cudaFreeAsync(d_dynamic_row, stream);
+    cudaFreeAsync(d_piv_array, stream);
+    cudaFreeAsync(d_pivot_val, stream); // [FIX]: Clean up new allocation
+    cudaStreamDestroy(stream);
+
+    // ---------------------------------------------------------
+    // PHASE 2: CPU Null Space Extraction & Orthogonalization
+    // ---------------------------------------------------------
+    int rank = h_rank;
+    if (rank == n) return {};
+
+    int null_dim = n - rank;
+    vector<vector<long long>> NS(null_dim, vector<long long>(n, 0));
+    vector<bool> is_pivot(n, false);
+    for (int i = 0; i < rank; i++) is_pivot[h_piv_array[i]] = true;
+
+    for (int col = 0, free_idx = 0; col < n; ++col) {
+        if (!is_pivot[col]) {
+            NS[free_idx][col] = 1;
+            for (int i = 0; i < rank; ++i)
+                NS[free_idx][h_piv_array[i]] = (MOD - flat_A[i * n + col]) % MOD;
+            free_idx++;
+        }
+    }
+
+    if (Orth) {
+        vector<long long> DP(null_dim, 0);
+        for (int i = 0; i < null_dim; ++i) {
+            for (int j = 0; j < i; ++j) {
+                // OPTIMIZATION: Conditional modulo avoids __int128 and defers expensive % ops
+                unsigned long long dot_accum = 0;
+                for (int k = 0; k < n; ++k) {
+                    dot_accum += (unsigned long long)NS[i][k] * NS[j][k];
+                    if (dot_accum >> 61) dot_accum %= MOD;
+                }
+                long long dot = (long long)(dot_accum % MOD);
+
+                long long c = (dot * inverse(DP[j])) % MOD;
+                for (int k = 0; k < n; ++k) {
+                    NS[i][k] = (NS[i][k] - ((c * NS[j][k]) % MOD) + MOD) % MOD;
+                }
+            }
+
+            unsigned long long norm_sq_accum = 0;
+            for (int k = 0; k < n; ++k) {
+                norm_sq_accum += (unsigned long long)NS[i][k] * NS[i][k];
+                if (norm_sq_accum >> 61) norm_sq_accum %= MOD;
+            }
+
+            if ((DP[i] = (long long)(norm_sq_accum % MOD)) == 0) {
+                throw std::invalid_argument("NullSpace's G-S Process Error: Isotropic vector encountered");
+            }
+        }
+    }
+
+    // OPTIMIZATION: Swap loop dimensions for better cache locality (Write linearly into NS_col[j])
+    vector<vector<long long>> NS_col(n, vector<long long>(null_dim));
+    tbb::parallel_for(tbb::blocked_range<int>(0, n), [&](const tbb::blocked_range<int>& r) {
+        for (int j = r.begin(); j != r.end(); ++j) {
+            for (int i = 0; i < null_dim; ++i) {
+                NS_col[j][i] = NS[i][j];
+            }
+        }
+        });
+
+    return NS_col;
 }
 inline vector<vector<long long>> Null_Space(const vector<vector<long long>>& A_2D, bool Orth) {
     if (A_2D.empty() || A_2D[0].empty()) return {};
@@ -974,8 +1587,7 @@ inline vector<vector<long long>> Null_Space(const vector<vector<long long>>& A_2
                 norm_sq = (norm_sq + NS[i][k] * NS[i][k]) % MOD;
             DP[i] = norm_sq;
             if (DP[i] == 0) {
-                printf("NullSpace's G-S Process Error : Isotropic vector encountered (v*v = 0 mod P)\n\n");
-                exit(1);
+                throw std::invalid_argument("NullSpace's G-S Process Error: Isotropic vector encountered (v*v = 0 mod P)");
             }
         }
     }
@@ -992,8 +1604,7 @@ inline vector<vector<long long>> Null_Space(const vector<vector<long long>>& A_2
 }
 inline vector<long long> Ax_b(const vector<vector<long long>>& A_2D, const vector<long long>& b) {
     if (A_2D.empty() || A_2D.size() != b.size()) {
-        printf("Ax=b calculation Error : Size is different\n\n");
-        exit(1);
+        throw std::invalid_argument("Ax=b calculation Error: Size is different");
     }
 
     int m = A_2D.size();
@@ -1066,8 +1677,7 @@ inline vector<long long> Ax_b(const vector<vector<long long>>& A_2D, const vecto
 }
 inline bool is_in(const vector<vector<long long>>& A_2D, const vector<long long>& b) {
     if (A_2D.empty() || A_2D.size() != b.size()) {
-        printf("Ax=b calculation Error : Size is different\n\n");
-        exit(1);
+        throw std::invalid_argument("Ax=b calculation Error: Size is different");
     }
 
     int m = A_2D.size();
@@ -1132,8 +1742,7 @@ inline void matrix_diagonalize_2x2(const vector<vector<long long>>& A, vector<ve
     else {
         long long k = seeds[inroot];
         if (k & 1) {        // If the exponent is odd, the square root DOES NOT EXIST in F_p.
-            printf("Matrix Diagonalize Error : Discriminant is a non-residue. Eigenvalues exist in F_p^2.\n\n");
-            exit(1);
+            throw std::invalid_argument("Matrix Diagonalize Error: Discriminant is a non-residue. Eigenvalues exist in F_p^2.");
         }
         long long seed2 = power(primitive, k >> 1);
         long long d1 = fr + seed2;
@@ -1153,8 +1762,7 @@ inline void matrix_diagonalize_2x2(const vector<vector<long long>>& A, vector<ve
             S[0][0] = 1; S[1][1] = 1; // Identity
         }
         else {
-            printf("Matrix Diagonalize Error : 2x2 matrix is defective (not diagonalizable)\n\n");
-            exit(1);
+            throw std::invalid_argument("Matrix Diagonalize Error: 2x2 matrix is defective (not diagonalizable)");
         }
     }
     else {
@@ -1618,16 +2226,14 @@ inline void matrix_diagonalize_4x4(const vector<vector<long long>>& A, vector<ve
         }
 
         if (m_count < m) {
-            printf("Matrix Diagonalize Error : 4x4 matrix is defective (not diagonalizable)\n\n");
-            exit(1);
+            throw std::invalid_argument("Matrix Diagonalize Error: 4x4 matrix is defective (not diagonalizable)");
         }
     }
 }
 inline void matrix_diagonalize_BF(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     int n = A.size();
     if (n == 0 || A.front().size() != n) {
-        printf("Matrix diagonalization Error : Matrix is not square\n\n");
-        exit(1);
+        throw std::invalid_argument("Matrix diagonalization Error: Matrix is not square");
     }
 
     S.assign(n, vector<long long>(n, 0));
@@ -1667,11 +2273,988 @@ inline void matrix_diagonalize_BF(vector<vector<long long>> A, vector<vector<lon
         for (int j = 0; j < n; ++j)
             A[j][j] = (A[j][j] + MOD - 1) % MOD;
     }
-    printf("Matrix Diagonalize Error : Matrix is defective (not diagonalizable over F_p)\n\n");
-    exit(1);
+    throw std::invalid_argument("Matrix Diagonalize Error: Matrix is defective (not diagonalizable over F_p)");
 }
-void matrix_diagonalize_krylov(const vector<vector<long long>>& A, vector<vector<long long>>& S, vector<vector<long long>>& D, long long MOD);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+__global__ void build_S_and_SD_kernel(const long long* R, const long long* diag, long long* S, long long* SD, int n, long long mod) {
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (i < n && j < n) {
+        unsigned long long local_sum = 0;
+        int limit = (i < j) ? i : j; // min(i, j)
+
+        for (int k = 0; k <= limit; ++k) {
+            // L[i][k]: 1 on diagonal, R[i][k] below diagonal
+            long long Lik = (k == i) ? 1 : R[i * n + k];
+
+            // U[k][j]: R[k][j] on and above diagonal (with 0-check on diagonal)
+            long long Ukj = R[k * n + j];
+            if (k == j && Ukj == 0) Ukj = 1;
+
+            local_sum += (unsigned long long)Lik * Ukj;
+            if (local_sum >> 61) local_sum %= mod; // Deferred modulo trick
+        }
+
+        long long S_ij = local_sum % mod;
+        S[i * n + j] = S_ij;
+        SD[i * n + j] = (S_ij * diag[j]) % mod;
+    }
+}
+
+__global__ void matmul_kernel(const long long* A, const long long* B, long long* C, int n, long long mod) {
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (i < n && j < n) {
+        unsigned long long local_sum = 0;
+        for (int k = 0; k < n; ++k) {
+            local_sum += (unsigned long long)A[i * n + k] * B[k * n + j];
+            if (local_sum >> 61) local_sum %= mod;
+        }
+        C[i * n + j] = local_sum % mod;
+    }
+}
+
+inline vector<vector<long long>> generate_test_matrix_gpu(int N, long long MOD, bool sparse_eigenvalues = false, bool invertible = false) {
+    // ---------------------------------------------------------
+    // 1. Thread-Safe CPU RNG (Sequential)
+    // ---------------------------------------------------------
+    vector<long long> flat_R(N * N);
+    vector<long long> diag(N);
+
+    int pool_size = max(1, N / 100);
+    vector<long long> eigen_pool(pool_size);
+    if (sparse_eigenvalues) {
+        for (int i = 0; i < pool_size; ++i) {
+            long long val = get_rand(MOD);
+            if (invertible && val == 0) val = 1;
+            eigen_pool[i] = val;
+        }
+    }
+
+    for (int i = 0; i < N * N; ++i) {
+        flat_R[i] = get_rand(MOD);
+    }
+
+    for (int i = 0; i < N; ++i) {
+        if (sparse_eigenvalues) {
+            diag[i] = eigen_pool[get_rand(MOD) % pool_size];
+        }
+        else {
+            long long val = get_rand(MOD);
+            if (invertible && val == 0) val = 1;
+            diag[i] = val;
+        }
+    }
+
+    // ---------------------------------------------------------
+    // 2. Async Allocations & Setup
+    // ---------------------------------------------------------
+    cudaStream_t stream;
+    cudaStreamCreate(&stream); // Dedicated stream for TBB concurrency
+
+    size_t bytes = N * N * sizeof(long long);
+    long long* d_R, * d_diag, * d_S, * d_SD, * d_S_inv, * d_Final;
+    long long* d_mults, * d_pivot_val; // [FIX]: Added d_pivot_val
+    int* d_pivot_row, * d_info;
+    int* h_info; // Pinned memory for error checking
+
+    cudaMallocAsync(&d_R, bytes, stream);
+    cudaMallocAsync(&d_diag, N * sizeof(long long), stream);
+    cudaMallocAsync(&d_S, bytes, stream);
+    cudaMallocAsync(&d_SD, bytes, stream);
+    cudaMallocAsync(&d_S_inv, bytes, stream);
+    cudaMallocAsync(&d_Final, bytes, stream);
+
+    cudaMallocAsync(&d_mults, N * sizeof(long long), stream);
+    cudaMallocAsync(&d_pivot_row, sizeof(int), stream);
+    cudaMallocAsync(&d_pivot_val, sizeof(long long), stream); // [FIX]: Allocate d_pivot_val
+    cudaMallocAsync(&d_info, sizeof(int), stream);
+
+    cudaMallocHost(&h_info, sizeof(int));
+
+    // Zero out the info flag on the device
+    cudaMemsetAsync(d_info, 0, sizeof(int), stream);
+
+    // Copy initial data to GPU asynchronously
+    cudaMemcpyAsync(d_R, flat_R.data(), bytes, cudaMemcpyHostToDevice, stream);
+    cudaMemcpyAsync(d_diag, diag.data(), N * sizeof(long long), cudaMemcpyHostToDevice, stream);
+
+    // GPU Launch Configurations
+    dim3 threads2D(16, 16);
+    dim3 blocks2D((N + 15) / 16, (N + 15) / 16);
+    int threads1D = 256;
+    int blocks1D = (N + threads1D - 1) / threads1D;
+
+    // ---------------------------------------------------------
+    // 3. 100% Asynchronous GPU Pipeline (No CPU Syncs)
+    // ---------------------------------------------------------
+
+    // Build S and SD simultaneously from R
+    build_S_and_SD_kernel << <blocks2D, threads2D, 0, stream >> > (d_R, d_diag, d_S, d_SD, N, MOD);
+
+    // Invert d_S natively on the GPU 
+    initIdentityKernel << <blocks2D, threads2D, 0, stream >> > (d_S_inv, N);
+
+    for (int p = 0; p < N; ++p) {
+        // [FIX]: Pass d_pivot_val so the scalar is recorded before normalization
+        findPivotKernel << <1, 256, 0, stream >> > (
+            d_S, N, N, p, nullptr, p, d_pivot_row, d_pivot_val, d_info);
+
+        // Update singularity status on device
+        updateDetInfoKernel << <1, 1, 0, stream >> > (
+            d_pivot_row, nullptr, p, N, nullptr, d_info, MOD);
+
+        swapRowsKernel<true> << <blocks1D, threads1D, 0, stream >> > (
+            d_S, d_S_inv, N, N, N, p, nullptr, d_pivot_row, d_info);
+
+        // [FIX]: Pass d_pivot_val to normalize without block-level race hazards
+        normalizePivotRowKernel<true> << <blocks1D, threads1D, 0, stream >> > (
+            d_S, d_S_inv, N, N, N, p, nullptr, p, d_pivot_row, MOD, d_pivot_val, d_info);
+
+        computeMultipliersKernel << <blocks1D, threads1D, 0, stream >> > (
+            d_S, N, N, p, nullptr, p, d_pivot_row, MOD, d_mults, true, d_info);
+
+        eliminateRowsKernel<true> << <blocks2D, threads2D, 0, stream >> > (
+            d_S, d_S_inv, N, N, N, p, nullptr, d_pivot_row, d_mults, MOD, d_info);
+    }
+
+    // Final Multiplication: A = SD * S_inv
+    matmul_kernel << <blocks2D, threads2D, 0, stream >> > (d_SD, d_S_inv, d_Final, N, MOD);
+
+    // ---------------------------------------------------------
+    // 4. Single Synchronization Point
+    // ---------------------------------------------------------
+    vector<long long> flat_Final(N * N);
+
+    cudaMemcpyAsync(h_info, d_info, sizeof(int), cudaMemcpyDeviceToHost, stream);
+    cudaMemcpyAsync(flat_Final.data(), d_Final, bytes, cudaMemcpyDeviceToHost, stream);
+
+    cudaStreamSynchronize(stream); // CPU waits ONLY here
+
+    if (*h_info == 1) {
+        throw std::invalid_argument("Error in Generation: Generated S is singular");
+    }
+
+    // ---------------------------------------------------------
+    // 5. Cleanup
+    // ---------------------------------------------------------
+    cudaFreeAsync(d_R, stream);
+    cudaFreeAsync(d_diag, stream);
+    cudaFreeAsync(d_S, stream);
+    cudaFreeAsync(d_SD, stream);
+    cudaFreeAsync(d_S_inv, stream);
+    cudaFreeAsync(d_Final, stream);
+    cudaFreeAsync(d_mults, stream);
+    cudaFreeAsync(d_pivot_row, stream);
+    cudaFreeAsync(d_pivot_val, stream); // [FIX]: Free d_pivot_val
+    cudaFreeAsync(d_info, stream);
+
+    cudaFreeHost(h_info);
+    cudaStreamDestroy(stream);
+
+    // Convert to 2D vector for return
+    vector<vector<long long>> Out(N, vector<long long>(N));
+    for (int i = 0; i < N; ++i) {
+        copy(flat_Final.begin() + i * N, flat_Final.begin() + (i + 1) * N, Out[i].begin());
+    }
+
+    return Out;
+}
+
+
+inline vector<vector<long long>> generate_test_matrix(int N, long long MOD, bool sparse_eigenvalues = false, bool invertible = false) {
+    // 1. Thread-Safe RNG: Pre-generate all random numbers sequentially.
+    // Memory allocation and a simple 2D sequential loop is incredibly fast 
+    // and completely sidesteps any RNG race conditions.
+    vector<vector<long long>> R(N, vector<long long>(N));
+    vector<long long> diag(N);
+
+    // Pre-generate a small pool for sparse (high-multiplicity) eigenvalues
+    int pool_size = N / 100;
+	if (pool_size < 1) pool_size = 1;
+    vector<long long> eigen_pool(pool_size);
+    if (sparse_eigenvalues) {
+        for (int i = 0; i < pool_size; ++i) {
+            long long val = get_rand(MOD);
+            if (invertible && val == 0) val = 1; // Prevent 0 eigenvalue
+            eigen_pool[i] = val;
+        }
+    }
+
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            R[i][j] = get_rand(MOD);
+        }
+
+        // Choose eigenvalue distribution based on the flag
+        if (sparse_eigenvalues) {
+            // Pick from the limited pool to guarantee repeating eigenvalues
+            diag[i] = eigen_pool[get_rand(MOD) % pool_size];
+        }
+        else {
+            // Dense: practically all distinct
+            long long val = get_rand(MOD);
+            if (invertible && val == 0) val = 1; // Prevent 0 eigenvalue
+            diag[i] = val;
+        }
+    }
+
+    vector<vector<long long>> L(N, vector<long long>(N, 0));
+    vector<vector<long long>> U(N, vector<long long>(N, 0));
+
+    // 2. Fully Parallel Construction (No sequential outer loops!)
+    tbb::parallel_for(tbb::blocked_range<int>(0, N), [&](const tbb::blocked_range<int>& r) {
+        for (int i = r.begin(); i != r.end(); ++i) {
+            L[i][i] = 1; // Unit lower diagonal guarantees det(L) = 1
+
+            for (int j = 0; j < i; ++j) L[i][j] = R[i][j];
+            for (int j = i; j < N; ++j) {
+                U[i][j] = R[i][j];
+                // Guarantee det(U) != 0. (If random hits 0, safely default to 1)
+                if (i == j && U[i][i] == 0) U[i][i] = 1;
+            }
+        }
+        });
+
+    // 3. Fully Parallel Matrix Multiplication: S = L * U
+    // Optimized: Because L and U are triangular, we only need to loop 'k' up to min(i, j)
+    vector<vector<long long>> S(N, vector<long long>(N, 0));
+    tbb::parallel_for(tbb::blocked_range<int>(0, N), [&](const tbb::blocked_range<int>& r) {
+        for (int i = r.begin(); i != r.end(); ++i) {
+            for (int j = 0; j < N; ++j) {
+                unsigned long long local_sum = 0;
+                int limit = std::min(i, j);
+                for (int k = 0; k <= limit; ++k) {
+                    local_sum += (unsigned long long)L[i][k] * U[k][j];
+                    if (local_sum >> 61) local_sum %= MOD; // Deferred modulo trick
+                }
+                S[i][j] = local_sum % MOD;
+            }
+        }
+        });
+
+    // 4. Fully Parallel Column Scaling: SD = S * D
+    vector<vector<long long>> SD(N, vector<long long>(N, 0));
+    tbb::parallel_for(tbb::blocked_range<int>(0, N), [&](const tbb::blocked_range<int>& r) {
+        for (int i = r.begin(); i != r.end(); ++i) {
+            for (int j = 0; j < N; ++j) {
+                SD[i][j] = (S[i][j] * diag[j]) % MOD;
+            }
+        }
+        });
+
+    // 5. Final multiplication
+    // Note: Ensure your matrix_inverse() and operator* are also using TBB internally!
+    return SD * matrix_inverse(S);
+}
+
+
+
+
+
+
+
+namespace PolyMath {
+    // Helper to strip leading zeros
+    void trim(vector<long long>& p) {
+        while (p.size() > 1 && p.back() == 0) p.pop_back();
+        if (p.empty()) p.push_back(0);
+    }
+
+    // O(N^2) Polynomial Multiplication
+    vector<long long> mul(const vector<long long>& A, const vector<long long>& B, long long MOD) {
+        if (A.empty() || B.empty()) return { 0 };
+        vector<long long> C(A.size() + B.size() - 1, 0);
+        for (size_t i = 0; i < A.size(); ++i) {
+            for (size_t j = 0; j < B.size(); ++j) {
+                C[i + j] = (C[i + j] + A[i] * B[j]) % MOD;
+            }
+        }
+        trim(C);
+        return C;
+    }
+
+    // O(N^2) Polynomial Long Division (Returns remainder A % B)
+    vector<long long> mod(vector<long long> A, const vector<long long>& B, long long MOD) {
+        trim(A);
+        vector<long long> b = B; trim(b);
+        if (b.size() == 1 && b[0] == 0) return { 0 }; // Div by zero fallback
+        if (A.size() < b.size()) return A;
+
+        long long inv_lead = inverse(b.back()); // Needs your global inverse()
+        for (int i = A.size() - 1; i >= (int)b.size() - 1; --i) {
+            if (A[i] == 0) continue;
+            long long factor = (A[i] * inv_lead) % MOD;
+            for (size_t j = 0; j < b.size() - 1; ++j) {
+                long long sub = (factor * b[j]) % MOD;
+                A[i - b.size() + 1 + j] = (A[i - b.size() + 1 + j] - sub + MOD) % MOD;
+            }
+            A[i] = 0; // Analytically guaranteed
+        }
+        trim(A);
+        return A;
+    }
+
+    // O(N^2) Polynomial Long Division (Returns QUOTIENT A / B)
+    vector<long long> div(vector<long long> A, const vector<long long>& B, long long MOD) {
+        trim(A);
+        vector<long long> b = B; trim(b);
+        if (b.size() == 1 && b[0] == 0) return { 0 }; // Div by zero fallback
+        if (A.size() < b.size()) return { 0 };
+
+        vector<long long> Q(A.size() - b.size() + 1, 0);
+        long long inv_lead = inverse(b.back());
+
+        for (int i = A.size() - 1; i >= (int)b.size() - 1; --i) {
+            if (A[i] == 0) continue;
+            long long factor = (A[i] * inv_lead) % MOD;
+
+            // Store in quotient
+            Q[i - b.size() + 1] = factor;
+
+            for (size_t j = 0; j < b.size() - 1; ++j) {
+                long long sub = (factor * b[j]) % MOD;
+                A[i - b.size() + 1 + j] = (A[i - b.size() + 1 + j] - sub + MOD) % MOD;
+            }
+            A[i] = 0; // Analytically guaranteed
+        }
+        trim(Q);
+        return Q;
+    }
+
+    // O(N^2 * log K) Binary Exponentiation for Polynomials: (base^exp) % P
+    vector<long long> pow_mod(vector<long long> base, long long exp, const vector<long long>& P, long long MOD) {
+        vector<long long> res = { 1 };
+        while (exp > 0) {
+            if (exp % 2 == 1) res = mod(mul(res, base, MOD), P, MOD);
+            base = mod(mul(base, base, MOD), P, MOD);
+            exp /= 2;
+        }
+        return res;
+    }
+
+    // Euclidean Algorithm for Polynomial GCD
+    vector<long long> gcd(vector<long long> A, vector<long long> B, long long MOD) {
+        trim(A); trim(B);
+        while (!(B.size() == 1 && B[0] == 0)) {
+            vector<long long> R = mod(A, B, MOD);
+            A = B;
+            B = R;
+        }
+        // Normalize so leading coefficient is 1
+        if (A.size() > 0 && A.back() != 1) {
+            long long inv = inverse(A.back());
+            for (long long& x : A) x = (x * inv) % MOD;
+        }
+        return A;
+    }
+}
+
+// 1. New Struct and Optimized Hessenberg Reduction (Tracks V with Cache-Friendly Transpose)
+struct HessenbergResult {
+    vector<vector<long long>> H;
+    vector<vector<long long>> V;
+};
+
+HessenbergResult reduce_to_hessenberg_with_V(vector<vector<long long>> H, long long MOD) {
+    int n = H.size();
+
+    // Maintain V as its transpose (V_T) so column operations become fast row operations
+    vector<vector<long long>> V_T(n, vector<long long>(n, 0));
+    for (int i = 0; i < n; ++i) V_T[i][i] = 1;
+
+    for (int r = 0; r < n - 2; ++r) {
+        int pivot = r + 1;
+        while (pivot < n && H[pivot][r] == 0) pivot++;
+        if (pivot == n) continue;
+
+        if (pivot != r + 1) {
+            swap(H[r + 1], H[pivot]);
+            for (int i = 0; i < n; ++i)
+                swap(H[i][r + 1], H[i][pivot]);
+            swap(V_T[r + 1], V_T[pivot]);
+        }
+
+        long long inv = inverse(H[r + 1][r]);
+        for (int i = r + 2; i < n; ++i) {
+            if (H[i][r] != 0) {
+                long long factor = (H[i][r] * inv) % MOD;
+
+                // Row operations on H
+                for (int j = r; j < n; ++j) {
+                    H[i][j] = (H[i][j] - factor * H[r + 1][j]) % MOD;
+                    if (H[i][j] < 0) H[i][j] += MOD;
+                }
+
+                // Column operations on H
+                for (int j = 0; j < n; ++j) {
+                    H[j][r + 1] = (H[j][r + 1] + factor * H[j][i]) % MOD;
+                }
+
+                // Column operations on V (Using V_T makes this a cache-friendly horizontal scan)
+                for (int j = 0; j < n; ++j) {
+                    V_T[r + 1][j] = (V_T[r + 1][j] + factor * V_T[i][j]) % MOD;
+                }
+            }
+        }
+    }
+
+    // Transpose V_T back to V to return standard row-major format
+    vector<vector<long long>> V(n, vector<long long>(n, 0));
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            V[i][j] = V_T[j][i];
+    return { H, V };
+}
+
+// 2. Compute the characteristic polynomial of a single unreduced Hessenberg block using Krylov
+vector<long long> get_char_poly_unreduced_hessenberg(const vector<vector<long long>>& H, int start, int end, long long MOD) {
+    int m = end - start + 1;
+    if (m == 1) {
+        // Char poly of 1x1 matrix [h] is x - h
+        return { (MOD - H[start][start]) % MOD, 1 };
+    }
+
+    // Krylov sequence starting with e_1 = [1, 0, ..., 0]^T
+    vector<vector<long long>> K(m, vector<long long>(m, 0));
+    vector<long long> curr(m, 0);
+    curr[0] = 1;
+
+    for (int j = 0; j < m; ++j) {
+        for (int i = 0; i < m; ++i) K[i][j] = curr[i];
+
+        vector<long long> next_v(m, 0);
+        for (int i = 0; i <= min(m - 1, j + 1); ++i) {
+            for (int k = max(0, i - 1); k <= min(m - 1, j); ++k) {
+                next_v[i] = (next_v[i] + H[start + i][start + k] * curr[k]) % MOD;
+            }
+        }
+        curr = next_v;
+    }
+
+    // Solve K * c = -H^m * e_1
+    vector<long long> target(m, 0);
+    for (int i = 0; i < m; ++i) target[i] = (MOD - curr[i]) % MOD;
+
+    vector<long long> c(m, 0);
+    for (int i = m - 1; i >= 0; --i) {
+        unsigned long long sum = target[i];
+        for (int j = i + 1; j < m; ++j) {
+            // (MOD - K) handles the implicit subtraction: target - (K * c)
+            sum += (unsigned long long)(MOD - K[i][j]) * c[j];
+            if (sum >> 61) sum %= MOD; // Defer modulo safely
+        }
+        sum %= MOD;
+        c[i] = (sum * inverse(K[i][i])) % MOD;
+    }
+
+    c.push_back(1); // Explicitly append the leading 1 for x^m
+    return c;
+}
+
+// 3. Modified Char Poly Wrapper (Accepts pre-reduced H to avoid double-work)
+inline vector<long long> get_char_poly_krylov(const vector<vector<long long>>& H, long long MOD) {
+    int n = H.size();
+    vector<long long> total_poly = { 1 };
+    int block_start = 0;
+
+    for (int i = 0; i < n; ++i) {
+        if (i == n - 1 || H[i + 1][i] == 0) {
+            vector<long long> block_poly = get_char_poly_unreduced_hessenberg(H, block_start, i, MOD);
+            total_poly = PolyMath::mul(total_poly, block_poly, MOD);
+            block_start = i + 1;
+        }
+    }
+    return total_poly;
+}
+
+// 4. Fast O(n^2) Nullspace for Upper Hessenberg Matrices (With Deferred Modulo)
+vector<vector<long long>> get_hessenberg_nullspace(const vector<vector<long long>>& H, long long lambda, long long MOD) {
+    int n = H.size();
+    if (n == 0) return {};
+
+    vector<vector<long long>> M = H;
+    for (int i = 0; i < n; ++i) {
+        M[i][i] = (M[i][i] - lambda) % MOD;
+        if (M[i][i] < 0) M[i][i] += MOD;
+    }
+
+    vector<int> pivot_col_to_row(n, -1);
+    int row = 0;
+
+    for (int col = 0; col < n && row < n; ++col) {
+        int sel = row;
+
+        // Due to Hessenberg structure, non-zeros only exist down to row = col + 1
+        int limit = min(n, col + 2);
+
+        while (sel < limit && M[sel][col] == 0) sel++;
+        if (sel == limit) continue;
+
+        if (sel != row) swap(M[row], M[sel]);
+        pivot_col_to_row[col] = row;
+
+        long long inv = inverse(M[row][col]);
+        for (int j = col; j < n; ++j) M[row][j] = (M[row][j] * inv) % MOD;
+
+        // OPTIMIZATION: Bounded elimination. We never have to eliminate rows below col + 1.
+        for (int i = row + 1; i < limit; ++i) {
+            if (M[i][col] != 0) {
+                long long factor = M[i][col];
+                for (int j = col + 1; j < n; ++j) {
+                    long long sub = (factor * M[row][j]) % MOD;
+                    M[i][j] = M[i][j] - sub + MOD;
+					if (M[i][j] >= MOD) M[i][j] -= MOD;
+                }
+                M[i][col] = 0;
+            }
+        }
+        row++;
+    }
+
+    vector<vector<long long>> basis;
+    for (int free_col = 0; free_col < n; ++free_col) {
+        if (pivot_col_to_row[free_col] == -1) {
+            vector<long long> vec(n, 0);
+            vec[free_col] = 1;
+
+            // Sequential Back-substitution using Deferred Modulo
+            for (int c = free_col - 1; c >= 0; --c) {
+                int r = pivot_col_to_row[c];
+                if (r != -1) {
+                    unsigned long long val = 0;
+                    for (int j = c + 1; j <= free_col; ++j) {
+                        if (vec[j]) {
+                            val += (unsigned long long)M[r][j] * vec[j];
+                            if (val >> 61) val %= MOD;
+                        }
+                    }
+                    vec[c] = (MOD - (val % MOD)) % MOD;
+                }
+            }
+            basis.push_back(vec);
+        }
+    }
+    return basis;
+}
+
+// Internal recursive root finder
+void cz_split(const vector<long long>& poly, vector<long long>& roots, long long MOD) {
+    if (poly.size() == 2) {
+        // Degree 1 polynomial: c_1 * x + c_0 = 0 => x = -c_0 / c_1
+        long long root = (MOD - poly[0]) % MOD;
+        long long inv_c1 = inverse(poly[1]);
+        roots.push_back((root * inv_c1) % MOD);
+        return;
+    }
+    if (poly.size() <= 1) return;
+
+    // Pick a random polynomial a(x) of degree < deg(poly)
+    vector<long long> a = { get_rand(MOD), 1 }; // a(x) = x + c
+
+    // Compute d(x) = gcd(a(x)^((p-1)/2) - 1, poly(x))
+    vector<long long> a_pow = PolyMath::pow_mod(a, (MOD - 1) / 2, poly, MOD);
+    a_pow[0] = (a_pow[0] - 1 + MOD) % MOD; // Subtract 1
+
+    vector<long long> d = PolyMath::gcd(a_pow, poly, MOD);
+
+    // If it successfully split the polynomial into non-trivial factors, recurse
+    if (d.size() > 1 && d.size() < poly.size()) {
+        cz_split(d, roots, MOD);
+
+        // BUG FIX: Use exact division (div) instead of modulo (mod)
+        cz_split(PolyMath::div(poly, d, MOD), roots, MOD);
+    }
+    else {
+        // Failed to split (50% chance). Try again in the next stack frame.
+        cz_split(poly, roots, MOD);
+    }
+}
+
+// --- The New Optimal Root Finder ---
+vector<long long> find_roots_Fp(const vector<long long>& poly, long long MOD) {
+    vector<long long> p = poly;
+    PolyMath::trim(p);
+    if (p.size() <= 1) return {};
+
+    // 1. Compute x^p (mod P) to isolate distinct roots
+    vector<long long> X = { 0, 1 }; // The polynomial f(x) = x
+    vector<long long> x_pow_p = PolyMath::pow_mod(X, MOD, p, MOD);
+
+    // 2. Subtract x: (x^p - x) mod P
+    x_pow_p[0] = (x_pow_p[0] - 0 + MOD) % MOD; // Constant term
+    if (x_pow_p.size() < 2) x_pow_p.resize(2, 0);
+    x_pow_p[1] = (x_pow_p[1] - 1 + MOD) % MOD; // x term
+    PolyMath::trim(x_pow_p);
+
+    // 3. g(x) = gcd(x^p - x, P(x)). This polynomial contains only the distinct linear factors.
+    vector<long long> g = PolyMath::gcd(x_pow_p, p, MOD);
+
+    // 4. Split g(x) using Cantor-Zassenhaus
+    vector<long long> roots;
+    cz_split(g, roots, MOD);
+    return roots;
+}
+
+// 5. Updated Main Wrapper (Now with Lock-Free TBB Parallelization)
+void matrix_diagonalize_krylov(const vector<vector<long long>>& A, vector<vector<long long>>& S, vector<vector<long long>>& D, long long MOD) {
+    int n = A.size();
+    S.assign(n, vector<long long>(n, 0));
+    D.assign(n, vector<long long>(n, 0));
+
+    // Phase 1: Reduce to Hessenberg (O(n^3))
+    HessenbergResult hess = reduce_to_hessenberg_with_V(A, MOD);
+
+    // Phase 2: Get characteristic polynomial from reduced H (O(n^3))
+    vector<long long> poly = get_char_poly_krylov(hess.H, MOD);
+
+    // Phase 3: Find eigenvalues
+    vector<long long> roots = find_roots_Fp(poly, MOD);
+
+    // Phase 4: Find Eigenvectors of H and map back to A in PARALLEL
+    std::atomic<int> col_idx{ 0 };
+
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, roots.size()),
+        [&](const tbb::blocked_range<size_t>& r) {
+            for (size_t i = r.begin(); i != r.end(); ++i) {
+                // Early exit: Stop if the matrix is fully populated
+                if (col_idx.load(std::memory_order_relaxed) >= n) return;
+
+                long long lambda = roots[i];
+
+                // O(n^2) nullspace extraction
+                vector<vector<long long>> H_basis = get_hessenberg_nullspace(hess.H, lambda, MOD);
+
+                for (const auto& y : H_basis) {
+                    // 1. Atomically claim our column index BEFORE doing the math
+                    // This entirely eliminates the need for std::mutex.
+                    int current_col = col_idx.fetch_add(1, std::memory_order_relaxed);
+                    
+                    if (current_col >= n) return; // Over-allocated, stop work
+
+                    // 2. Do the O(n^2) back-substitution directly into the matrix S
+                    for (int r_idx = 0; r_idx < n; ++r_idx) {
+                        
+                        // 3. Use 128-bit integer to avoid inner-loop modulo branching 
+                        // (Requires 64-bit GCC/Clang). If on 32-bit MSVC, revert to your original sum >> 61 logic.
+                        long long sum = 0; 
+                        
+                        for (int c_idx = 0; c_idx < n; ++c_idx) {
+                            if (y[c_idx]) {
+                                sum += (long long)hess.V[r_idx][c_idx] * y[c_idx];
+                                if (sum >> 61) sum %= MOD;
+                            }
+                        }
+                        
+                        // Modulo happens exactly once per row instead of randomly inside the loop
+                        S[r_idx][current_col] = (long long)(sum % MOD);
+                    }
+                    
+                    // Safely write the eigenvalue to the diagonal
+                    D[current_col][current_col] = lambda;
+                }
+            }
+        });
+}
+
+//// 5. Updated Main Wrapper (Sequential Version)
+//void matrix_diagonalize_krylov(const vector<vector<long long>>& A, vector<vector<long long>>& S, vector<vector<long long>>& D, long long MOD) {
+//    int n = A.size();
+//    S.assign(n, vector<long long>(n, 0));
+//    D.assign(n, vector<long long>(n, 0));
+//
+//    // Phase 1: Reduce to Hessenberg (O(n^3))
+//    HessenbergResult hess = reduce_to_hessenberg_with_V(A, MOD);
+//
+//    // Phase 2: Get characteristic polynomial from reduced H (O(n^3))
+//    vector<long long> poly = get_char_poly_krylov(hess.H, MOD);
+//
+//    // Phase 3: Find eigenvalues
+//    vector<long long> roots = find_roots_Fp(poly, MOD);
+//
+//    // Phase 4: Find Eigenvectors of H and map back to A sequentially
+//    int col_idx = 0;
+//
+//    for (size_t i = 0; i < roots.size(); ++i) {
+//        // Early exit: Stop if the matrix is fully populated
+//        if (col_idx >= n) break;
+//
+//        long long lambda = roots[i];
+//
+//        // O(n^2) nullspace extraction
+//        vector<vector<long long>> H_basis = get_hessenberg_nullspace(hess.H, lambda, MOD);
+//
+//        for (const auto& y : H_basis) {
+//            // 1. Claim our column index
+//            int current_col = col_idx++;
+//
+//            if (current_col >= n) break; // Over-allocated, stop work
+//
+//            // 2. Do the O(n^2) back-substitution directly into the matrix S
+//            for (int r_idx = 0; r_idx < n; ++r_idx) {
+//
+//                // 3. Use 128-bit integer to avoid inner-loop modulo branching 
+//                // (Requires 64-bit GCC/Clang). If on 32-bit MSVC, revert to your original sum >> 61 logic.
+//                long long sum = 0;
+//
+//                for (int c_idx = 0; c_idx < n; ++c_idx) {
+//                    if (y[c_idx]) {
+//                        sum += (long long)hess.V[r_idx][c_idx] * y[c_idx];
+//                        if (sum >> 61) sum %= MOD;
+//                    }
+//                }
+//
+//                // Modulo happens exactly once per row instead of randomly inside the loop
+//                S[r_idx][current_col] = (long long)(sum % MOD);
+//            }
+//
+//            // Safely write the eigenvalue to the diagonal
+//            D[current_col][current_col] = lambda;
+//        }
+//
+//        // Break outer loop if matrix is filled during inner loop iterations
+//        if (col_idx >= n) break;
+//    }
+//}
+
+
+
+
+
+
+
+
+
 inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
+    int n = (int)A.size();
+    S.assign(n, vector<long long>(n, 0));
+    D.assign(n, vector<long long>(n, 0));
+
+    vector<vector<long long>> AP_1 = matrix_power_gpu(A, MOD - 1);
+    vector<vector<long long>> ZN1 = Null_Space_gpu(AP_1 - I_n(n), Orth);
+    int eigvec_count = ZN1.empty() ? 0 : (int)ZN1[0].size();
+    if (eigvec_count > 0)
+        for (int j = 0; j < n; ++j)
+            copy(ZN1[j].begin(), ZN1[j].end(), S[j].begin());
+    vector<vector<long long>> ZN2 = Null_Space_gpu(AP_1, Orth);
+    if (!ZN2.empty())
+        for (int j = 0; j < n; ++j)
+            copy(ZN2[j].begin(), ZN2[j].end(), S[j].begin() + eigvec_count);
+
+    vector<vector<long long>> New_A(eigvec_count, vector<long long>(eigvec_count, 0));
+    if (eigvec_count > 0 && eigvec_count < n) {
+        vector<vector<long long>> S_inv = matrix_inverse_gpu(S);
+        vector<vector<long long>> AS_left(n, vector<long long>(eigvec_count, 0));
+
+        tbb::parallel_for(tbb::blocked_range<int>(0, n),
+            [&](const tbb::blocked_range<int>& r) {
+                for (int i = r.begin(); i != r.end(); ++i) {
+                    for (int j = 0; j < eigvec_count; ++j) {
+                        long long sum = 0;
+                        for (int k = 0; k < n; ++k)
+                            sum = (sum + A[i][k] * S[k][j]) % MOD;
+                        AS_left[i][j] = sum;
+                    }
+                }
+            });
+        tbb::parallel_for(tbb::blocked_range<int>(0, eigvec_count),
+            [&](const tbb::blocked_range<int>& r) {
+                for (int i = r.begin(); i != r.end(); ++i) {
+                    for (int j = 0; j < eigvec_count; ++j) {
+                        long long sum = 0;
+                        for (int k = 0; k < n; ++k)
+                            sum = (sum + S_inv[i][k] * AS_left[k][j]) % MOD;
+                        New_A[i][j] = sum;
+                    }
+                }
+            });
+    }
+    else if (eigvec_count == n) {
+        New_A = A;
+    }
+
+    n = eigvec_count;
+    vector<vector<long long>> Ss = I_n(n);
+    vector<vector<vector<long long>>> M;
+    M.push_back(New_A);
+    vector<long long> FE(1, 1);
+    long long powC = MOD - 1;
+
+    int mat_i = 0;
+
+    for (int pi = 0; pi < MOD_decompose.size(); ++pi) {
+        int start_mat_i = mat_i;
+        int mati_upperbound = (int)M.size();
+
+        vector<int> stp_offsets(mati_upperbound - start_mat_i, 0);
+        int current_stp = 0;
+        for (int k = start_mat_i; k < mati_upperbound; ++k) {
+            stp_offsets[k - start_mat_i] = current_stp;
+            current_stp += M[k].size();
+        }
+
+        // Struct to hold results from each parallel block locally
+        struct BlockResult {
+            vector<vector<vector<long long>>> new_matrices;
+            vector<long long> new_FEs;
+        };
+        vector<BlockResult> block_results(mati_upperbound - start_mat_i);
+        powC /= MOD_decompose[pi];
+        vector<vector<long long>> ST(n, vector<long long>(n, 0));
+        tbb::parallel_for(tbb::blocked_range<int>(start_mat_i, mati_upperbound),
+            [&](const tbb::blocked_range<int>& r) {
+                for (int m_idx = r.begin(); m_idx != r.end(); ++m_idx) {
+
+                    int local_stp = stp_offsets[m_idx - start_mat_i];
+                    auto& local_result = block_results[m_idx - start_mat_i];
+
+                    int N = M[m_idx].size();
+                    if (N >= 1 && N <= 4) {
+                        vector<vector<long long>> D, S;
+                        if (N == 1) {
+                            D = { { M[m_idx][0][0] } };
+                            S = { { 1 } };
+                        }
+                        else if (N == 2)
+                            matrix_diagonalize_2x2(M[m_idx], S, D);
+                        else if (N == 3)
+                            matrix_diagonalize_3x3(M[m_idx], S, D);
+                        else if (N == 4)
+                            matrix_diagonalize_4x4(M[m_idx], S, D);
+                        for (int r = 0; r < N; ++r) {
+                            local_result.new_matrices.push_back({ {D[r][r]} });
+                            local_result.new_FEs.push_back(D[r][r]);
+                            for (int c = 0; c < N; ++c)
+                                ST[local_stp + r][local_stp + c] = S[r][c];
+                        }
+                        continue;
+                    }
+
+                    int m_size = M[m_idx].size();
+                    int roots_size = ones_roots[MOD_decompose[pi]].size();
+                    int current_col = 0;
+
+                    vector<vector<long long>> PM = matrix_power_gpu(M[m_idx], powC);
+                    vector<vector<long long>> St(m_size, vector<long long>(m_size, 0));
+                    vector<int> eigspace_dim;
+
+                    long long seed = seeds[FE[m_idx]] * inverse(MOD_decompose[pi]) % MOD;
+                    long long seed2 = power(primitive, seed);
+
+                    struct RootResult {
+                        long long candidate;
+                        vector<vector<long long>> ZN;
+                    };
+                    vector<RootResult> valid_roots;
+
+                    std::mutex roots_mtx;
+                    atomic<int> local_eigvec_count{ 0 };
+                    if (roots_size <= 5) {
+                        tbb::parallel_for(tbb::blocked_range<int>(0, roots_size),
+                            [&](const tbb::blocked_range<int>& inner_r) {
+                                for (int i = inner_r.begin(); i != inner_r.end(); ++i) {
+                                    if (local_eigvec_count.load(std::memory_order_relaxed) >= m_size) return;
+
+                                    long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;
+                                    vector<vector<long long>> query = PM;
+                                    for (int j = 0; j < query.size(); ++j) {
+                                        query[j][j] -= candidate;
+                                        if (query[j][j] < 0) query[j][j] += MOD;
+                                    }
+
+                                    vector<vector<long long>> ZN = query.size() > 30 ? Null_Space_gpu(query, Orth) : Null_Space(query, Orth);
+
+                                    if (!ZN.empty()) {
+                                        std::lock_guard<std::mutex> lock(roots_mtx);
+                                        if (local_eigvec_count.load(std::memory_order_relaxed) >= m_size) return;
+                                        valid_roots.push_back({ candidate, ZN });
+                                        local_eigvec_count.fetch_add(ZN[0].size(), std::memory_order_relaxed);
+                                    }
+                                }
+                            });
+                    }
+                    else {
+                        HessenbergResult hess_PM = reduce_to_hessenberg_with_V(PM, MOD);
+                        vector<long long> fp_roots = find_roots_Fp(get_char_poly_krylov(hess_PM.H, MOD), MOD);
+
+                        tbb::parallel_for(tbb::blocked_range<size_t>(0, fp_roots.size()),
+                            [&](const tbb::blocked_range<size_t>& inner_r) {
+                                for (size_t i = inner_r.begin(); i != inner_r.end(); ++i) {
+                                    // Early exit: Stop if other threads already found the full basis
+                                    if (local_eigvec_count.load(std::memory_order_relaxed) >= m_size) return;
+
+                                    long long candidate = fp_roots[i];
+
+                                    // O(n^2) nullspace extraction on the upper Hessenberg matrix
+                                    vector<vector<long long>> H_basis = get_hessenberg_nullspace(hess_PM.H, candidate, MOD);
+
+                                    if (!H_basis.empty()) {
+                                        int k = H_basis.size();
+                                        vector<vector<long long>> ZN = hess_PM.V * matrix_transpose_tiled(H_basis);
+                                        std::lock_guard<std::mutex> lock(roots_mtx);
+                                        if (local_eigvec_count.load(std::memory_order_relaxed) >= m_size) return;
+                                        valid_roots.push_back({ candidate, std::move(ZN) });
+                                        local_eigvec_count.fetch_add(k, std::memory_order_relaxed);
+                                    }
+                                }
+                            });
+                    }
+
+                    for (auto& root : valid_roots) {
+                        if (current_col >= m_size) break;
+
+                        local_result.new_FEs.push_back(root.candidate);
+                        eigspace_dim.push_back((int)root.ZN[0].size());
+
+                        for (int j = 0; j < root.ZN.size(); ++j)
+                            copy(root.ZN[j].begin(), root.ZN[j].end(), St[j].begin() + current_col);
+                        current_col += root.ZN[0].size();
+                    }
+
+                    vector<vector<long long>> mt = St.size() > 30 ? matrix_inverse_gpu(St) * M[m_idx] * St : matrix_inverse(St) * M[m_idx] * St;
+                    for (int i = 0; i < St.size(); ++i)
+                        copy(St[i].begin(), St[i].end(), ST[i + local_stp].begin() + local_stp);
+                    matrix_chop(local_result.new_matrices, mt, eigspace_dim);
+                }
+            });
+
+        mat_i = mati_upperbound;
+        for (const auto& res : block_results) {
+            for (const auto& mat : res.new_matrices) M.push_back(mat);
+            for (auto fe : res.new_FEs) FE.push_back(fe);
+        }
+        Ss = Ss * ST; // update S sequentially
+    }
+    for (int Di = 0; mat_i < M.size(); ++mat_i)
+        for (int i = 0; i < M[mat_i].size(); ++i, ++Di)
+            D[Di][Di] = M[mat_i][i][i];
+    vector<vector<long long>> St_final = I_n((int)S.size());
+    for (int i = 0; i < Ss.size(); ++i)
+        copy(Ss[i].begin(), Ss[i].end(), St_final[i].begin());
+
+    S = S * St_final;
+}
+
+inline void matrix_diagonalize_henry_naive(vector<vector<long long>> A, vector<vector<long long>>& S, vector<vector<long long>>& D, bool Orth) {
     int n = (int)A.size();
     S.assign(n, vector<long long>(n, 0));
     D.assign(n, vector<long long>(n, 0));
@@ -1779,24 +3362,27 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
 
                     int m_size = M[m_idx].size();
                     int roots_size = ones_roots[MOD_decompose[pi]].size();
-                    if (roots_size > log(m_size)) {
-                    //if (roots_size > m_size) {
-                            //printf("big(%d %d)",roots_size,m_size);
-                        vector<vector<long long>> S_krylov, D_krylov;
-                        matrix_diagonalize_krylov(M[m_idx], S_krylov, D_krylov, MOD);
-                        for (int i = 0; i < m_size; ++i) {
-                            local_result.new_matrices.push_back({ {D_krylov[i][i]} });
-                            local_result.new_FEs.push_back(D_krylov[i][i]);
-                            for (int r = 0; r < m_size; ++r)
-                                ST[local_stp + r][local_stp + i] = S_krylov[r][i];
+
+                    if (roots_size > 5) {
+                        vector<vector<long long>> D, S;
+                        matrix_diagonalize_krylov(M[m_idx], S, D, MOD);
+
+                        for (int r = 0; r < N; ++r) {
+                            local_result.new_matrices.push_back({ {D[r][r]} });
+                            local_result.new_FEs.push_back(D[r][r]);
+                            for (int c = 0; c < N; ++c) {
+                                ST[local_stp + r][local_stp + c] = S[r][c];
+                            }
                         }
-                        continue; // Skip the rest of the loop because it is already fully diagonalized
+                        continue;
                     }
+
 
                     vector<vector<long long>> PM = matrix_power(M[m_idx], powC);
                     vector<vector<long long>> St(m_size, vector<long long>(m_size, 0));
                     vector<int> eigspace_dim;
-                    int current_col = 0, local_eigvec_count = 0;
+                    int current_col = 0;
+                    //int local_eigvec_count = 0;
 
                     long long seed = seeds[FE[m_idx]] * inverse(MOD_decompose[pi]) % MOD;
                     long long seed2 = power(primitive, seed);
@@ -1807,162 +3393,31 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
                     };
                     vector<RootResult> valid_roots;
 
+                    std::mutex roots_mtx;
+                    atomic<int> local_eigvec_count{ 0 };
 
+                    tbb::parallel_for(tbb::blocked_range<int>(0, roots_size),
+                        [&](const tbb::blocked_range<int>& inner_r) {
+                            for (int i = inner_r.begin(); i != inner_r.end(); ++i) {
+                                if (local_eigvec_count.load(std::memory_order_relaxed) >= m_size) return;
 
+                                long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;
+                                vector<vector<long long>> query = PM;
+                                for (int j = 0; j < query.size(); ++j) {
+                                    query[j][j] -= candidate;
+                                    if (query[j][j] < 0) query[j][j] += MOD;
+                                }
 
+                                vector<vector<long long>> ZN = Null_Space(query, Orth);
 
-
-                    //atomic<int> local_eigvec_count{ 0 };
-
-                    //tbb::parallel_for(tbb::blocked_range<int>(0, roots_size),
-                    //    [&](const tbb::blocked_range<int>& inner_r) {
-                    //        for (int i = inner_r.begin(); i != inner_r.end(); ++i) {
-                    //            if (local_eigvec_count.load(std::memory_order_relaxed) >= m_size) return;
-
-                    //            long long candidate = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;
-                    //            vector<vector<long long>> query = PM;
-                    //            for (int j = 0; j < query.size(); ++j) {
-                    //                query[j][j] -= candidate;
-                    //                if (query[j][j] < 0) query[j][j] += MOD;
-                    //            }
-
-                    //            vector<vector<long long>> ZN = Null_Space(query, Orth);
-
-                    //            if (!ZN.empty()) {
-                    //                valid_roots.push_back({ candidate, ZN });
-                    //                local_eigvec_count.fetch_add(ZN[0].size(), std::memory_order_relaxed);
-                    //            }
-                    //        }
-                    //    });
-
-                    
-
-
-
-
-
-                    // Setup all candidates
-                    vector<long long> candidates(roots_size);
-                    for (int i = 0; i < roots_size; ++i)
-                        candidates[i] = seed2 * ones_roots[MOD_decompose[pi]][i] % MOD;
-
-                    vector<long long> found_eigenvalues; // Track found roots globally
-
-                    // Helper to compute: v_out = (PM * v_in) - (c * v_in)
-                    auto apply_PM_minus_cI = [&](const vector<long long>& v_in, long long c) -> pair<vector<long long>, bool> {
-                        vector<long long> v_out = PM * v_in;
-                        bool is_zero = true;
-                        for (int r = 0; r < m_size; ++r) {
-                            long long val = (v_out[r] - c * v_in[r]) % MOD;
-                            if (val < 0) val += MOD;
-                            v_out[r] = val;
-                            if (val != 0) is_zero = false;
-                        }
-                        return { move(v_out), is_zero };
-                        };
-
-                    // Helper to extract eigenspace and update global state
-                    auto extract_and_add_eigenvalue = [&](long long found_val) {
-                        vector<vector<long long>> ZN = Null_Space(PM - I_n(PM.size(), found_val), Orth);
-                        if (!ZN.empty()) {
-                            valid_roots.push_back({ found_val, ZN });
-                            local_eigvec_count += ZN[0].size();
-                            found_eigenvalues.push_back(found_val);
-                        }
-                        };
-
-                    // Recursive Divide and Conquer for Eigenvalues
-                    auto find_eigenvalues_rec = [&](auto& self, vector<long long> v, int start, int end) -> void {
-                        if (local_eigvec_count >= m_size) return;
-
-                        // Base case: if vector is zero
-                        bool v_is_zero = true;
-                        for (long long x : v) if (x != 0) { v_is_zero = false; break; }
-                        if (v_is_zero) return;
-
-                        if (start >= end) return;
-                        if (start == end - 1) { // Base case: 1 candidate left
-                            extract_and_add_eigenvalue(candidates[start]);
-                            return;
-                        }
-						printf("%d ", end - start);
-
-                        int mid = start + ((end - start) >> 1);
-
-                        // 1. Apply L (start to mid) to isolate R-components
-                        vector<long long> v_R = v;
-                        for (int i = start; i < mid; ++i) {
-                            pair<vector<long long>, bool> res = apply_PM_minus_cI(v_R, candidates[i]);
-                            if (res.second) {
-                                // MASSIVE OPTIMIZATION: Vector annihilated! 
-                                // R is completely empty, and the rest of L (i+1 to mid) is empty.
-                                extract_and_add_eigenvalue(candidates[i]);
-                                pair<vector<long long>, bool> deflated_v = apply_PM_minus_cI(v, candidates[i]);
-                                self(self, deflated_v.first, start, i);
-                                return;
-                            }
-                            v_R = move(res.first);
-                        }
-
-                        // 2. Search R (mid to end) using the isolated vector
-                        int count_before = found_eigenvalues.size();
-                        self(self, v_R, mid, end);
-                        int count_after = found_eigenvalues.size();
-
-                        // 3. Deflate newly found eigenvalues from R
-                        vector<long long> v_L = move(v);
-                        for (int idx = count_before; idx < count_after; ++idx) {
-                            pair<vector<long long>, bool> res = apply_PM_minus_cI(v_L, found_eigenvalues[idx]);
-                            v_L = move(res.first);
-                        }
-
-                        // 4. Search L (start to mid)
-                        self(self, v_L, start, mid);
-                        };
-
-                    // Iterate through standard basis vectors
-                    for (int basis_idx = 0; basis_idx < m_size && local_eigvec_count < m_size; ++basis_idx) {
-                        vector<long long> v(m_size, 0);
-                        v[basis_idx] = 1;
-
-                        // PRE-CHECK: Is v already a pure eigenvector? (Collinearity check: PM * v == c * v)
-                        vector<long long> PM_v = PM * v;
-                        long long c = -1;
-                        bool is_eigenvector = true;
-
-                        for (int i = 0; i < m_size; ++i) {
-                            if (v[i] != 0) {
-                                if (c == -1) // Find the scalar c from the first non-zero element
-                                    c = (PM_v[i] * inverse(v[i])) % MOD;
-                                long long expected = (c * v[i]) % MOD;
-                                if (PM_v[i] != expected) {
-                                    is_eigenvector = false;
-                                    break;
+                                if (!ZN.empty()) {
+                                    std::lock_guard<std::mutex> lock(roots_mtx);
+                                    if (local_eigvec_count.load(std::memory_order_relaxed) >= m_size) return;
+                                    valid_roots.push_back({ candidate, ZN });
+                                    local_eigvec_count.fetch_add(ZN[0].size(), std::memory_order_relaxed);
                                 }
                             }
-                            else if (PM_v[i] != 0) {
-                                is_eigenvector = false;
-                                break;
-                            }
-                        }
-
-                        if (is_eigenvector) {
-                            // v is a pure eigenvector! Extract it and skip the heavy recursion entirely.
-                            extract_and_add_eigenvalue(c);
-                            continue;
-                        }
-
-                        // Not a pure eigenvector, run the recursive divide-and-conquer
-                        find_eigenvalues_rec(find_eigenvalues_rec, v, 0, roots_size);
-                        break;
-                    }
-
-
-
-
-
-
-
+                        });
 
                     for (auto& root : valid_roots) {
                         if (current_col >= m_size) break;
@@ -1974,7 +3429,7 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
                             copy(root.ZN[j].begin(), root.ZN[j].end(), St[j].begin() + current_col);
                         current_col += root.ZN[0].size();
                     }
-					//printf("%d", (int)eigspace_dim.size());
+                    //printf("%d", (int)eigspace_dim.size());
 
                     vector<vector<long long>> mt = matrix_inverse(St) * M[m_idx] * St;
                     for (int i = 0; i < St.size(); ++i)
@@ -2015,474 +3470,13 @@ inline void matrix_diagonalize_henry(vector<vector<long long>> A, vector<vector<
 
 
 
-
-
-
-
-
-inline vector<vector<long long>> generate_test_matrix(int N, long long MOD) {
-    // 1. Thread-Safe RNG: Pre-generate all random numbers sequentially.
-    // Memory allocation and a simple 2D sequential loop is incredibly fast 
-    // and completely sidesteps any RNG race conditions.
-    vector<vector<long long>> R(N, vector<long long>(N));
-    vector<long long> diag(N);
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            R[i][j] = get_rand(MOD);
-        }
-        diag[i] = get_rand(MOD); // These will be our eigenvalues
-    }
-
-    vector<vector<long long>> L(N, vector<long long>(N, 0));
-    vector<vector<long long>> U(N, vector<long long>(N, 0));
-
-    // 2. Fully Parallel Construction (No sequential outer loops!)
-    tbb::parallel_for(tbb::blocked_range<int>(0, N), [&](const tbb::blocked_range<int>& r) {
-        for (int i = r.begin(); i != r.end(); ++i) {
-            L[i][i] = 1; // Unit lower diagonal guarantees det(L) = 1
-
-            for (int j = 0; j < i; ++j) L[i][j] = R[i][j];
-            for (int j = i; j < N; ++j) {
-                U[i][j] = R[i][j];
-                // Guarantee det(U) != 0. (If random hits 0, safely default to 1)
-                if (i == j && U[i][i] == 0) U[i][i] = 1;
-            }
-        }
-        });
-
-    // 3. Fully Parallel Matrix Multiplication: S = L * U
-    // Optimized: Because L and U are triangular, we only need to loop 'k' up to min(i, j)
-    vector<vector<long long>> S(N, vector<long long>(N, 0));
-    tbb::parallel_for(tbb::blocked_range<int>(0, N), [&](const tbb::blocked_range<int>& r) {
-        for (int i = r.begin(); i != r.end(); ++i) {
-            for (int j = 0; j < N; ++j) {
-                unsigned long long local_sum = 0;
-                int limit = std::min(i, j);
-                for (int k = 0; k <= limit; ++k) {
-                    local_sum += (unsigned long long)L[i][k] * U[k][j];
-                    if (local_sum >> 61) local_sum %= MOD; // Deferred modulo trick
-                }
-                S[i][j] = local_sum % MOD;
-            }
-        }
-        });
-
-    // 4. Fully Parallel Column Scaling: SD = S * D
-    vector<vector<long long>> SD(N, vector<long long>(N, 0));
-    tbb::parallel_for(tbb::blocked_range<int>(0, N), [&](const tbb::blocked_range<int>& r) {
-        for (int i = r.begin(); i != r.end(); ++i) {
-            for (int j = 0; j < N; ++j) {
-                SD[i][j] = (S[i][j] * diag[j]) % MOD;
-            }
-        }
-        });
-
-    // 5. Final multiplication
-    // Note: Ensure your matrix_inverse() and operator* are also using TBB internally!
-    return SD * matrix_inverse(S);
-}
-
-
-
-
-
-
-
-// Helper to multiply two polynomials over F_p
-vector<long long> multiply_polys(const vector<long long>& A, const vector<long long>& B, long long MOD) {
-    int degA = A.size() - 1;
-    int degB = B.size() - 1;
-    vector<long long> C(degA + degB + 1, 0);
-    for (int i = 0; i <= degA; ++i) {
-        for (int j = 0; j <= degB; ++j) {
-            C[i + j] = (C[i + j] + A[i] * B[j]) % MOD;
-        }
-    }
-    return C;
-}
-
-// 1. New Struct and Optimized Hessenberg Reduction (Tracks V with Cache-Friendly Transpose)
-struct HessenbergResult {
-    vector<vector<long long>> H;
-    vector<vector<long long>> V;
-};
-
-HessenbergResult reduce_to_hessenberg_with_V(vector<vector<long long>> H, long long MOD) {
-    int n = H.size();
-
-    // Maintain V as its transpose (V_T) so column operations become fast row operations
-    vector<vector<long long>> V_T(n, vector<long long>(n, 0));
-    for (int i = 0; i < n; ++i) V_T[i][i] = 1;
-
-    for (int r = 0; r < n - 2; ++r) {
-        int pivot = r + 1;
-        while (pivot < n && H[pivot][r] == 0) pivot++;
-        if (pivot == n) continue;
-
-        if (pivot != r + 1) {
-            swap(H[r + 1], H[pivot]);
-            for (int i = 0; i < n; ++i)
-                swap(H[i][r + 1], H[i][pivot]);
-            swap(V_T[r + 1], V_T[pivot]);
-        }
-
-        long long inv = inverse(H[r + 1][r]);
-        for (int i = r + 2; i < n; ++i) {
-            if (H[i][r] != 0) {
-                long long factor = (H[i][r] * inv) % MOD;
-
-                // Row operations on H
-                for (int j = r; j < n; ++j) {
-                    H[i][j] = (H[i][j] - factor * H[r + 1][j]) % MOD;
-                    if (H[i][j] < 0) H[i][j] += MOD;
-                }
-
-                // Column operations on H
-                for (int j = 0; j < n; ++j) {
-                    H[j][r + 1] = (H[j][r + 1] + factor * H[j][i]) % MOD;
-                }
-
-                // Column operations on V (Using V_T makes this a cache-friendly horizontal scan)
-                for (int j = 0; j < n; ++j) {
-                    V_T[r + 1][j] = (V_T[r + 1][j] + factor * V_T[i][j]) % MOD;
-                }
-            }
-        }
-    }
-
-    // Transpose V_T back to V to return standard row-major format
-    vector<vector<long long>> V(n, vector<long long>(n, 0));
-    for (int i = 0; i < n; ++i)
-        for (int j = 0; j < n; ++j)
-            V[i][j] = V_T[j][i];
-    return { H, V };
-}
-
-// 2. Compute the characteristic polynomial of a single unreduced Hessenberg block using Krylov
-vector<long long> get_char_poly_unreduced_hessenberg(const vector<vector<long long>>& H, int start, int end, long long MOD) {
-    int m = end - start + 1;
-    if (m == 1) {
-        // Char poly of 1x1 matrix [h] is x - h
-        return { (MOD - H[start][start]) % MOD, 1 };
-    }
-
-    // Krylov sequence starting with e_1 = [1, 0, ..., 0]^T
-    vector<vector<long long>> K(m, vector<long long>(m, 0));
-    vector<long long> curr(m, 0);
-    curr[0] = 1;
-
-    for (int j = 0; j < m; ++j) {
-        for (int i = 0; i < m; ++i) K[i][j] = curr[i];
-
-        // Compute next_v = H_block * curr
-        vector<long long> next_v(m, 0);
-        for (int i = 0; i < m; ++i) {
-            for (int k = 0; k < m; ++k) {
-                next_v[i] = (next_v[i] + H[start + i][start + k] * curr[k]) % MOD;
-            }
-        }
-        curr = next_v;
-    }
-
-    // Solve K * c = -H^m * e_1
-    vector<long long> target(m, 0);
-    for (int i = 0; i < m; ++i) target[i] = (MOD - curr[i]) % MOD;
-
-    // Gaussian Elimination (Guaranteed to succeed because block is unreduced Hessenberg!)
-    for (int i = 0; i < m; ++i) {
-        int pivot = i;
-        while (pivot < m && K[pivot][i] == 0) pivot++;
-
-        swap(K[i], K[pivot]);
-        swap(target[i], target[pivot]);
-
-        long long inv_pivot = inverse(K[i][i]);
-        for (int j = i; j < m; ++j) K[i][j] = (K[i][j] * inv_pivot) % MOD;
-        target[i] = (target[i] * inv_pivot) % MOD;
-
-        for (int k = i + 1; k < m; ++k) {
-            long long factor = K[k][i];
-            for (int j = i; j < m; ++j) {
-                K[k][j] = (K[k][j] - factor * K[i][j]) % MOD;
-                if (K[k][j] < 0) K[k][j] += MOD;
-            }
-            target[k] = (target[k] - factor * target[i]) % MOD;
-            if (target[k] < 0) target[k] += MOD;
-        }
-    }
-
-    vector<long long> c(m, 0);
-    for (int i = m - 1; i >= 0; --i) {
-        c[i] = target[i];
-        for (int j = i + 1; j < m; ++j) {
-            c[i] = (c[i] - K[i][j] * c[j]) % MOD;
-            if (c[i] < 0) c[i] += MOD;
-        }
-    }
-
-    c.push_back(1); // Explicitly append the leading 1 for x^m
-    return c;
-}
-
-// 3. Modified Char Poly Wrapper (Accepts pre-reduced H to avoid double-work)
-inline vector<long long> get_char_poly_krylov(const vector<vector<long long>>& H, long long MOD) {
-    int n = H.size();
-    vector<long long> total_poly = { 1 };
-    int block_start = 0;
-
-    for (int i = 0; i < n; ++i) {
-        if (i == n - 1 || H[i + 1][i] == 0) {
-            vector<long long> block_poly = get_char_poly_unreduced_hessenberg(H, block_start, i, MOD);
-            total_poly = multiply_polys(total_poly, block_poly, MOD);
-            block_start = i + 1;
-        }
-    }
-    return total_poly;
-}
-
-// 4. Fast O(n^2) Nullspace for Upper Hessenberg Matrices (With Deferred Modulo)
-vector<vector<long long>> get_hessenberg_nullspace(const vector<vector<long long>>& H, long long lambda, long long MOD) {
-    int n = H.size();
-    if (n == 0) return {};
-
-    vector<vector<long long>> M = H;
-    for (int i = 0; i < n; ++i) {
-        M[i][i] = (M[i][i] - lambda) % MOD;
-        if (M[i][i] < 0) M[i][i] += MOD;
-    }
-
-    vector<int> pivot_col_to_row(n, -1);
-    int row = 0;
-
-    for (int col = 0; col < n && row < n; ++col) {
-        int sel = row;
-        while (sel < n && M[sel][col] == 0) sel++;
-        if (sel == n) continue;
-
-        if (sel != row) swap(M[row], M[sel]);
-        pivot_col_to_row[col] = row;
-
-        long long inv = inverse(M[row][col]);
-        for (int j = col; j < n; ++j) M[row][j] = (M[row][j] * inv) % MOD;
-
-        for (int i = row + 1; i < n; ++i) {
-            if (M[i][col] != 0) {
-                long long factor = M[i][col];
-                for (int j = col; j < n; ++j) {
-                    long long sub = (factor * M[row][j]) % MOD;
-                    M[i][j] = (M[i][j] - sub + MOD) % MOD;
-                }
-            }
-        }
-        row++;
-    }
-
-    vector<vector<long long>> basis;
-    for (int free_col = 0; free_col < n; ++free_col) {
-        if (pivot_col_to_row[free_col] == -1) {
-            vector<long long> vec(n, 0);
-            vec[free_col] = 1;
-
-            // Sequential Back-substitution using Deferred Modulo
-            for (int c = free_col - 1; c >= 0; --c) {
-                int r = pivot_col_to_row[c];
-                if (r != -1) {
-                    unsigned long long val = 0;
-                    for (int j = c + 1; j <= free_col; ++j) {
-                        if (vec[j]) {
-                            val += (unsigned long long)M[r][j] * vec[j];
-                            if (val >> 61) val %= MOD;
-                        }
-                    }
-                    vec[c] = (MOD - (val % MOD)) % MOD;
-                }
-            }
-            basis.push_back(vec);
-        }
-    }
-    return basis;
-}
-
-namespace PolyMath {
-    // Helper to strip leading zeros
-    void trim(vector<long long>& p) {
-        while (p.size() > 1 && p.back() == 0) p.pop_back();
-        if (p.empty()) p.push_back(0);
-    }
-
-    // O(N^2) Polynomial Multiplication
-    vector<long long> mul(const vector<long long>& A, const vector<long long>& B, long long MOD) {
-        if (A.empty() || B.empty()) return { 0 };
-        vector<long long> C(A.size() + B.size() - 1, 0);
-        for (size_t i = 0; i < A.size(); ++i) {
-            for (size_t j = 0; j < B.size(); ++j) {
-                C[i + j] = (C[i + j] + A[i] * B[j]) % MOD;
-            }
-        }
-        trim(C);
-        return C;
-    }
-
-    // O(N^2) Polynomial Long Division (Returns remainder A % B)
-    vector<long long> mod(vector<long long> A, const vector<long long>& B, long long MOD) {
-        trim(A);
-        vector<long long> b = B; trim(b);
-        if (b.size() == 1 && b[0] == 0) return { 0 }; // Div by zero fallback
-        if (A.size() < b.size()) return A;
-
-        long long inv_lead = inverse(b.back()); // Needs your global inverse()
-        for (int i = A.size() - 1; i >= (int)b.size() - 1; --i) {
-            if (A[i] == 0) continue;
-            long long factor = (A[i] * inv_lead) % MOD;
-            for (size_t j = 0; j < b.size(); ++j) {
-                long long sub = (factor * b[j]) % MOD;
-                A[i - b.size() + 1 + j] = (A[i - b.size() + 1 + j] - sub + MOD) % MOD;
-            }
-        }
-        trim(A);
-        return A;
-    }
-
-    // O(N^2 * log K) Binary Exponentiation for Polynomials: (base^exp) % P
-    vector<long long> pow_mod(vector<long long> base, long long exp, const vector<long long>& P, long long MOD) {
-        vector<long long> res = { 1 };
-        while (exp > 0) {
-            if (exp % 2 == 1) res = mod(mul(res, base, MOD), P, MOD);
-            base = mod(mul(base, base, MOD), P, MOD);
-            exp /= 2;
-        }
-        return res;
-    }
-
-    // Euclidean Algorithm for Polynomial GCD
-    vector<long long> gcd(vector<long long> A, vector<long long> B, long long MOD) {
-        trim(A); trim(B);
-        while (!(B.size() == 1 && B[0] == 0)) {
-            vector<long long> R = mod(A, B, MOD);
-            A = B;
-            B = R;
-        }
-        // Normalize so leading coefficient is 1
-        if (A.size() > 0 && A.back() != 1) {
-            long long inv = inverse(A.back());
-            for (long long& x : A) x = (x * inv) % MOD;
-        }
-        return A;
-    }
-}
-
-// Internal recursive root finder
-void cz_split(const vector<long long>& poly, vector<long long>& roots, long long MOD) {
-    if (poly.size() == 2) {
-        // Degree 1 polynomial: c_1 * x + c_0 = 0 => x = -c_0 / c_1
-        long long root = (MOD - poly[0]) % MOD;
-        long long inv_c1 = inverse(poly[1]);
-        roots.push_back((root * inv_c1) % MOD);
-        return;
-    }
-    if (poly.size() <= 1) return;
-
-    // Pick a random polynomial a(x) of degree < deg(poly)
-    vector<long long> a(poly.size() - 1);
-    for (size_t i = 0; i < a.size(); ++i) a[i] = get_rand(MOD);
-
-    // Compute d(x) = gcd(a(x)^((p-1)/2) - 1, poly(x))
-    vector<long long> a_pow = PolyMath::pow_mod(a, (MOD - 1) / 2, poly, MOD);
-    a_pow[0] = (a_pow[0] - 1 + MOD) % MOD; // Subtract 1
-
-    vector<long long> d = PolyMath::gcd(a_pow, poly, MOD);
-
-    // If it successfully split the polynomial into non-trivial factors, recurse
-    if (d.size() > 1 && d.size() < poly.size()) {
-        cz_split(d, roots, MOD);
-        // poly(x) / d(x) = the other half of the roots
-        cz_split(PolyMath::mod(poly, d, MOD), roots, MOD);
-    }
-    else {
-        // Failed to split (50% chance). Try again in the next stack frame.
-        cz_split(poly, roots, MOD);
-    }
-}
-
-// --- The New Optimal Root Finder ---
-vector<long long> find_roots_Fp(const vector<long long>& poly, long long MOD) {
-    vector<long long> p = poly;
-    PolyMath::trim(p);
-    if (p.size() <= 1) return {};
-
-    // 1. Compute x^p (mod P) to isolate distinct roots
-    vector<long long> X = { 0, 1 }; // The polynomial f(x) = x
-    vector<long long> x_pow_p = PolyMath::pow_mod(X, MOD, p, MOD);
-
-    // 2. Subtract x: (x^p - x) mod P
-    x_pow_p[0] = (x_pow_p[0] - 0 + MOD) % MOD; // Constant term
-    if (x_pow_p.size() < 2) x_pow_p.resize(2, 0);
-    x_pow_p[1] = (x_pow_p[1] - 1 + MOD) % MOD; // x term
-    PolyMath::trim(x_pow_p);
-
-    // 3. g(x) = gcd(x^p - x, P(x)). This polynomial contains only the distinct linear factors.
-    vector<long long> g = PolyMath::gcd(x_pow_p, p, MOD);
-
-    // 4. Split g(x) using Cantor-Zassenhaus
-    vector<long long> roots;
-    cz_split(g, roots, MOD);
-    return roots;
-}
-
-// 5. Updated Main Wrapper (Glues everything together in O(n^3) with deferred modulo mapping)
-void matrix_diagonalize_krylov(const vector<vector<long long>>& A, vector<vector<long long>>& S, vector<vector<long long>>& D, long long MOD) {
-    int n = A.size();
-    S.assign(n, vector<long long>(n, 0));
-    D.assign(n, vector<long long>(n, 0));
-
-    // Phase 1: Reduce to Hessenberg AND track similarity transformations (O(n^3))
-    HessenbergResult hess = reduce_to_hessenberg_with_V(A, MOD);
-
-    // Phase 2: Get characteristic polynomial from reduced H (O(n^3))
-    vector<long long> poly = get_char_poly_krylov(hess.H, MOD);
-
-    // Phase 3: Find eigenvalues (Expected O(n^2 log P))
-    vector<long long> roots = find_roots_Fp(poly, MOD);
-
-    // Phase 4: Find Eigenvectors of H and map back to A in O(n^3) total
-    int col_idx = 0;
-    for (long long lambda : roots) {
-        // Runs strictly in O(n^2) per eigenvalue
-        vector<vector<long long>> H_basis = get_hessenberg_nullspace(hess.H, lambda, MOD);
-
-        for (const auto& y : H_basis) {
-            if (col_idx >= n) break;
-
-            // Map back: x = V * y (Takes O(n^2) with deferred modulo)
-            for (int i = 0; i < n; ++i) {
-                unsigned long long sum = 0;
-                for (int j = 0; j < n; ++j) {
-                    if (y[j]) {
-                        sum += (unsigned long long)hess.V[i][j] * y[j];
-                        if (sum >> 61) sum %= MOD;
-                    }
-                }
-                S[i][col_idx] = sum % MOD;
-            }
-            D[col_idx][col_idx] = lambda;
-            col_idx++;
-        }
-        if (col_idx >= n) break;
-    }
-}
-
-
-
-
-
-
-
 // --- Experiment B: Full Traditional vs Full Proposed Algorithm ---
 inline void EX_B() {
-    // 1. Open the text file for writing
-    std::ofstream outfile("experiment_B_results.txt");
+    // 1. Create a dynamic filename based on the MOD value
+    std::string filename = "experiment_B_results_" + std::to_string(MOD) + ".txt";
+    std::ofstream outfile(filename);
     if (!outfile.is_open()) {
-        printf("Error: Could not open experiment_B_results.txt for writing.\n");
+        printf("Error: Could not open %s for writing.\n", filename.c_str());
         return;
     }
 
@@ -2498,13 +3492,14 @@ inline void EX_B() {
     print_and_write("Cache initialized.\n\n");
 
     //vector<int> N_values = { 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192 };
-    vector<int> N_values = { 512, 1024, 2048, 4096, 8192 };
-    //std::vector<int> N_values;
-    //for (int i = 1; i < 20; ++i)
-    //    N_values.push_back(i * 100);
+    //vector<int> N_values = { 512, 1024, 2048, 4096, 8192 };
+    vector<int> N_values;
+    for (int i = 1; i < 10; ++i)
+        N_values.push_back(i * 300);
 
     print_and_write("=========================================================================================================\n");
-    print_and_write("Experiment B: Full Krylov Diagonalization vs Proposed Algorithm (Fixed p)\n");
+    // Dynamically insert the MOD value using std::to_string
+    print_and_write("Experiment B: Full Krylov Diagonalization vs Proposed Algorithm (" + std::to_string(MOD) + ")\n");
     print_and_write("=========================================================================================================\n");
     print_and_write("N\tTrials\tTrad Time (s)\tTrad Exp (x)\tProp Time (s)\tProp Exp (x)\tSpeedup\n");
     print_and_write("---------------------------------------------------------------------------------------------------------\n");
@@ -2514,7 +3509,7 @@ inline void EX_B() {
     double prev_avg_henry = 0.0;
 
     for (int N : N_values) {
-        int num_trials = (N <= 256) ? 10 : (N <= 512) ? 5 : 2;
+        int num_trials = (N <= 2000) ? 10 : 5;
 
         double total_time_krylov = 0.0;
         double total_time_henry = 0.0;
@@ -2525,7 +3520,7 @@ inline void EX_B() {
 
         for (int trial = 0; trial < num_trials; ++trial) {
             printf("G");
-            std::vector<std::vector<long long>> A = generate_test_matrix(N, MOD);
+            std::vector<std::vector<long long>> A = generate_test_matrix_gpu(N, MOD, false, false);
 
             // --- Time the Full Traditional Baseline ---
             printf("K");
@@ -2537,17 +3532,10 @@ inline void EX_B() {
                 printf("Krylov Diagonalization Error: A*S != S*D\n");
                 exit(1);
             }
-            bool zero_check = true;
-            for (int i = 0; i < N; ++i) {
-                if (S_krylov[i][0]) {
-                    zero_check = false;
-                    break;
-                }
-            }
-            if (zero_check) {
-                printf("Krylov Diagonalization Error: S_krylov has zero column\n");
-                exit(1);
-            }
+			if (matrix_rank(S_krylov) != N) {
+				printf("Krylov Diagonalization Error: S is not full rank\n");
+				exit(1);
+			}
 
             std::chrono::duration<double> duration_krylov = end_krylov - start_krylov;
             total_time_krylov += duration_krylov.count();
@@ -2562,15 +3550,8 @@ inline void EX_B() {
                 printf("Henry Diagonalization Error: A*S != S*D\n");
                 exit(1);
             }
-            zero_check = true;
-            for (int i = 0; i < N; ++i) {
-                if (S_henry[i][0]) {
-                    zero_check = false;
-                    break;
-                }
-            }
-            if (zero_check) {
-                printf("Henry Diagonalization Error: S_henry has zero column\n");
+            if (matrix_rank(S_henry) != N) {
+                printf("Henry Diagonalization Error: S is not full rank\n");
                 exit(1);
             }
 
@@ -2611,32 +3592,642 @@ inline void EX_B() {
 
     print_and_write("=========================================================================================================\n");
 
+    // 4. Close the file and notify the user using the dynamic filename
+    outfile.close();
+    printf("Results successfully saved to '%s'\n", filename.c_str());
+}
+
+// --- Experiment C: Parallel Scaling Evaluation (O(I(n)) Proof) ---
+inline void EX_C() {
+    // 1. Create a dynamic filename based on the MOD value
+    std::string filename = "experiment_C_results_" + std::to_string(MOD) + ".txt";
+    std::ofstream outfile(filename);
+    if (!outfile.is_open()) {
+        printf("Error: Could not open %s for writing.\n", filename.c_str());
+        return;
+    }
+
+    // Helper lambda to print to both console and file simultaneously
+    auto print_and_write = [&](const std::string& text) {
+        printf("%s", text.c_str());
+        outfile << text;
+        };
+
+    print_and_write("Initializing inverse cache for field F_p...\n");
+    for (long long i = 1; i < MOD; ++i)
+        inverse(i);
+    print_and_write("Cache initialized.\n\n");
+
+    // This array can now hold ANY arbitrary sequence of N values
+    //vector<int> N_values = { 32, 64, 128, 256, 512, 1024, 2048, 4096 };
+    vector<int> N_values;
+    for (int i = 0; i < 10; ++i)
+        N_values.push_back((i + 1) * 300);
+
+    print_and_write("=========================================================================================================\n");
+    // Dynamically insert the MOD value using std::to_string
+    print_and_write("Experiment C: Parallel Diagonalization vs Parallel Inversion Scaling (" + std::to_string(MOD) + ")\n");
+    print_and_write("=========================================================================================================\n");
+    print_and_write("N\tTrials\tInversion (s)\tInv Exp (x)\tDiag Total (s)\tDiag Exp (x)\tRatio (Diag/Inv)\n");
+    print_and_write("---------------------------------------------------------------------------------------------------------\n");
+
+    double prev_inv_time = -1.0;
+    double prev_diag_time = -1.0;
+    int prev_N = -1; // Added to track the previous matrix dimension
+
+    for (int N : N_values) {
+        // Fewer trials for very large matrices
+        int num_trials = (N <= 2000) ? 10 : 5;
+
+        double total_time_inv = 0.0;
+        double total_time_diag = 0.0;
+
+        vector<vector<long long>> S_out, D_out;
+
+        for (int trial = 0; trial < num_trials; ++trial) {
+            vector<vector<long long>> A = generate_test_matrix_gpu(N, MOD, false, true);
+
+            // --- Time Parallel Matrix Inversion I(n) ---
+            auto start_inv = std::chrono::high_resolution_clock::now();
+            vector<vector<long long>> A_inv = matrix_inverse(A);
+            auto end_inv = std::chrono::high_resolution_clock::now();
+
+            std::chrono::duration<double> duration_inv = end_inv - start_inv;
+            total_time_inv += duration_inv.count();
+
+            // --- Time Parallel Proposed Diagonalization ---
+            auto start_diag = std::chrono::high_resolution_clock::now();
+            matrix_diagonalize_henry(A, S_out, D_out, false);
+            auto end_diag = std::chrono::high_resolution_clock::now();
+
+            std::chrono::duration<double> duration_diag = end_diag - start_diag;
+            total_time_diag += duration_diag.count();
+        }
+
+        double avg_inv = total_time_inv / num_trials;
+        double avg_diag = total_time_diag / num_trials;
+
+        // Calculate empirical exponents dynamically using the general formula
+        double exp_inv = 0.0;
+        double exp_diag = 0.0;
+
+        if (prev_inv_time > 0.0 && prev_N > 0) {
+            double n_ratio = (double)N / prev_N;
+            // x = ln(T_new / T_old) / ln(N_new / N_old)
+            exp_inv = log(avg_inv / prev_inv_time) / log(n_ratio);
+            exp_diag = log(avg_diag / prev_diag_time) / log(n_ratio);
+        }
+
+        double ratio = avg_diag / avg_inv;
+
+        // 2. Format the numbers safely into a buffer
+        char buffer[256];
+        if (prev_inv_time < 0.0) {
+            snprintf(buffer, sizeof(buffer), "%d\t%d\t%lf\t-\t\t%lf\t-\t\t%.2fx\n", N, num_trials, avg_inv, avg_diag, ratio);
+        }
+        else {
+            snprintf(buffer, sizeof(buffer), "%d\t%d\t%lf\t%.3f\t\t%lf\t%.3f\t\t%.2fx\n", N, num_trials, avg_inv, exp_inv, avg_diag, exp_diag, ratio);
+        }
+
+        // 3. Send formatted buffer to both console and file
+        print_and_write(buffer);
+
+        // Store current metrics for the next iteration's exponent calculation
+        prev_inv_time = avg_inv;
+        prev_diag_time = avg_diag;
+        prev_N = N;
+    }
+    print_and_write("=========================================================================================================\n");
+
+    // 4. Close the file and notify the user using the dynamic filename
+    outfile.close();
+    printf("Results successfully saved to '%s'\n", filename.c_str());
+}
+
+// --- Experiment D: Naive Henry vs Optimized Henry Algorithm ---
+inline void EX_D() {
+    // 1. Open the text file for writing
+    std::ofstream outfile("experiment_D_results.txt");
+    if (!outfile.is_open()) {
+        printf("Error: Could not open experiment_D_results.txt for writing.\n");
+        return;
+    }
+
+    // Helper lambda to print to both console and file simultaneously
+    auto print_and_write = [&](const std::string& text) {
+        printf("%s", text.c_str());
+        outfile << text;
+        };
+
+    print_and_write("Initializing inverse cache for field F_p...\n");
+    for (long long i = 1; i < MOD; ++i)
+        inverse(i);
+    print_and_write("Cache initialized.\n\n");
+
+    vector<int> N_values;
+    for (int i = 1; i < 10; ++i)
+        N_values.push_back(i * 500);
+
+    print_and_write("=========================================================================================================\n");
+    print_and_write("Experiment D: Naive Henry vs Optimized Henry Algorithm (Fixed p)\n");
+    print_and_write("=========================================================================================================\n");
+    print_and_write("N\tTrials\tNaive Time(s)\tNaive Exp(x)\tOpt Time (s)\tOpt Exp (x)\tSpeedup\n");
+    print_and_write("---------------------------------------------------------------------------------------------------------\n");
+
+    int prev_N = 0;
+    double prev_avg_naive = 0.0;
+    double prev_avg_opt = 0.0;
+
+    for (int N : N_values) {
+        int num_trials = (N <= 256) ? 10 : (N <= 512) ? 5 : 2;
+
+        double total_time_naive = 0.0;
+        double total_time_opt = 0.0;
+
+        // Ensure both algorithms have fresh output matrices
+        std::vector<std::vector<long long>> S_naive, D_naive;
+        std::vector<std::vector<long long>> S_opt, D_opt;
+
+        for (int trial = 0; trial < num_trials; ++trial) {
+            printf("G");
+            std::vector<std::vector<long long>> A = generate_test_matrix(N, MOD, true, false);
+
+            // --- Time the Naive Henry Baseline ---
+            printf("N");
+            auto start_naive = std::chrono::high_resolution_clock::now();
+            matrix_diagonalize_henry_naive(A, S_naive, D_naive, false);
+            auto end_naive = std::chrono::high_resolution_clock::now();
+
+            if (A * S_naive != S_naive * D_naive) {
+                printf("Naive Henry Error: A*S != S*D\n");
+                exit(1);
+            }
+            if (matrix_rank(S_naive) != N) {
+                printf("Naive Henry Error: S is not full rank\n");
+                exit(1);
+            }
+
+            std::chrono::duration<double> duration_naive = end_naive - start_naive;
+            total_time_naive += duration_naive.count();
+
+            // --- Time the Optimized Henry Algorithm ---
+            printf("O");
+            auto start_opt = std::chrono::high_resolution_clock::now();
+            matrix_diagonalize_henry(A, S_opt, D_opt, false);
+            auto end_opt = std::chrono::high_resolution_clock::now();
+
+            if (A * S_opt != S_opt * D_opt) {
+                printf("Optimized Henry Error: A*S != S*D\n");
+                exit(1);
+            }
+            if (matrix_rank(S_opt) != N) {
+                printf("Optimized Henry Error: S is not full rank\n");
+                exit(1);
+            }
+
+            std::chrono::duration<double> duration_opt = end_opt - start_opt;
+            total_time_opt += duration_opt.count();
+        }
+        printf("\n");
+
+        double avg_naive = total_time_naive / num_trials;
+        double avg_opt = total_time_opt / num_trials;
+        double speedup = avg_naive / avg_opt;
+
+        // 2. Format the numbers safely into a buffer to retain your exact formatting
+        char buffer[256];
+
+        if (prev_N > 0 && prev_avg_naive > 0.0 && prev_avg_opt > 0.0) {
+            // Calculate exponents
+            double exp_naive = std::log(avg_naive / prev_avg_naive) / std::log((double)N / prev_N);
+            double exp_opt = std::log(avg_opt / prev_avg_opt) / std::log((double)N / prev_N);
+
+            snprintf(buffer, sizeof(buffer), "%d\t%d\t%lf\t%lf\t%lf\t%lf\t%.2fx\n",
+                N, num_trials, avg_naive, exp_naive, avg_opt, exp_opt, speedup);
+        }
+        else {
+            // First run, no previous data
+            snprintf(buffer, sizeof(buffer), "%d\t%d\t%lf\tN/A\t\t%lf\tN/A\t\t%.2fx\n",
+                N, num_trials, avg_naive, avg_opt, speedup);
+        }
+
+        // 3. Send formatted buffer to both console and file
+        print_and_write(buffer);
+
+        // Store current values for the next iteration
+        prev_N = N;
+        prev_avg_naive = avg_naive;
+        prev_avg_opt = avg_opt;
+    }
+
+    print_and_write("=========================================================================================================\n");
+
     // 4. Close the file and notify the user
     outfile.close();
-    printf("Results successfully saved to 'experiment_B_results.txt'\n");
+    printf("Results successfully saved to 'experiment_D_results.txt'\n");
+}
+
+// --- Experiment B: Full Traditional vs Full Proposed Algorithm vs Inverse ---
+inline void EX_FULL() {
+    // 1. Create a dynamic filename based on the MOD value
+    std::string filename = "experiment_FULL_results_" + std::to_string(MOD) + ".txt";
+    std::ofstream outfile(filename);
+    if (!outfile.is_open()) {
+        printf("Error: Could not open %s for writing.\n", filename.c_str());
+        return;
+    }
+
+    // Helper lambda to print to both console and file simultaneously
+    auto print_and_write = [&](const std::string& text) {
+        printf("%s", text.c_str());
+        outfile << text;
+        };
+
+    print_and_write("Initializing inverse cache for field F_p...\n");
+    for (long long i = 1; i < MOD; ++i)
+        inverse(i);
+    print_and_write("Cache initialized.\n\n");
+
+    vector<int> N_values;
+    for (int i = 1; i <= 10; ++i)
+        N_values.push_back(i * 300);
+    //vector<int> N_values = { 2100, 2400, 2700, 3000 };
+
+    print_and_write("=======================================================================================================================================\n");
+    // Dynamically insert the MOD value using std::to_string
+    print_and_write("Experiment FULL: Proposed (Henry) vs Krylov Diagonalization vs Matrix Inverse (" + std::to_string(MOD) + ")\n");
+    print_and_write("=======================================================================================================================================\n");
+    print_and_write("N\tTrials\tHenry(s)\tHenry(x)\t|\tKrylov(s)\tKrylov(x)\tSpeedup\t|\tInverse(s)\tInverse(x)\tSpeedup\n");
+    print_and_write("---------------------------------------------------------------------------------------------------------------------------------------\n");
+
+    int prev_N = 0;
+    double prev_avg_henry = 0.0;
+    double prev_avg_krylov = 0.0;
+    double prev_avg_inverse = 0.0;
+
+    for (int N : N_values) {
+        int num_trials = (N <= 2000) ? 10 : 5;
+
+        double total_time_henry = 0.0;
+        double total_time_krylov = 0.0;
+        double total_time_inverse = 0.0;
+
+        for (int trial = 0; trial < num_trials; ++trial) {
+            std::vector<std::vector<long long>> A;
+
+            // 1. Guard Matrix Generation Separately
+            bool matrix_generated = false;
+            while (!matrix_generated) {
+                try {
+                    printf("G");
+                    A = generate_test_matrix_gpu(N, MOD, false, true);
+                    matrix_generated = true;
+                }
+                catch (const std::exception& e) {
+                    printf("\n[Matrix Gen Error] %s - Retrying matrix generation...\n", e.what());
+                }
+                catch (...) {
+                    printf("\n[Matrix Gen Error] Unknown exception - Retrying matrix generation...\n");
+                }
+            }
+
+            // 2. Guard Algorithms and retry with the SAME matrix if they fail
+            bool trial_successful = false;
+            while (!trial_successful) {
+                try {
+                    // --- Time the Proposed Algorithm (Henry) ---
+                    printf("H");
+                    std::vector<std::vector<long long>> S_henry, D_henry;
+                    auto start_henry = std::chrono::high_resolution_clock::now();
+                    matrix_diagonalize_henry(A, S_henry, D_henry, false);
+                    auto end_henry = std::chrono::high_resolution_clock::now();
+
+                    if (A * S_henry != S_henry * D_henry) {
+                        throw std::runtime_error("Henry Diagonalization Error: A*S != S*D");
+                    }
+                    if (matrix_rank_gpu(S_henry) != N) {
+                        throw std::runtime_error("Henry Diagonalization Error: S is not full rank");
+                    }
+
+                    std::chrono::duration<double> duration_henry = end_henry - start_henry;
+
+                    // --- Time the Full Traditional Baseline (Krylov) ---
+                    printf("K");
+                    std::vector<std::vector<long long>> S_krylov, D_krylov;
+                    auto start_krylov = std::chrono::high_resolution_clock::now();
+                    matrix_diagonalize_krylov(A, S_krylov, D_krylov, MOD);
+                    auto end_krylov = std::chrono::high_resolution_clock::now();
+
+                    if (A * S_krylov != S_krylov * D_krylov) {
+                        throw std::runtime_error("Krylov Diagonalization Error: A*S != S*D");
+                    }
+                    if (matrix_rank_gpu(S_krylov) != N) {
+                        throw std::runtime_error("Krylov Diagonalization Error: S is not full rank");
+                    }
+
+                    std::chrono::duration<double> duration_krylov = end_krylov - start_krylov;
+
+                    // --- Time Matrix Inverse ---
+                    printf("I");
+                    auto start_inverse = std::chrono::high_resolution_clock::now();
+                    std::vector<std::vector<long long>> A_inv = matrix_inverse_gpu(A);
+                    auto end_inverse = std::chrono::high_resolution_clock::now();
+
+                    std::chrono::duration<double> duration_inverse = end_inverse - start_inverse;
+
+                    // ONLY add to total times if all three algorithms finished without throwing exceptions
+                    total_time_henry += duration_henry.count();
+                    total_time_krylov += duration_krylov.count();
+                    total_time_inverse += duration_inverse.count();
+
+                    // Mark as successful to break the retry loop
+                    trial_successful = true;
+                }
+                catch (const std::exception& e) {
+                    // WARNING: If the error is deterministic (e.g. matrix is singular), this will infinite loop.
+                    printf("\n[Error] %s - Retrying trial with SAME matrix...\n", e.what());
+                }
+                catch (...) {
+                    printf("\n[Error] Unknown exception occurred - Retrying trial with SAME matrix...\n");
+                }
+            }
+        }
+        printf("\n");
+
+        double avg_henry = total_time_henry / num_trials;
+        double avg_krylov = total_time_krylov / num_trials;
+        double avg_inverse = total_time_inverse / num_trials;
+
+        // Speedups are calculated relative to Henry
+        double speedup_krylov = avg_krylov / avg_henry;
+        double speedup_inverse = avg_inverse / avg_henry;
+
+        // 2. Format the numbers safely into a larger buffer
+        char buffer[512];
+
+        if (prev_N > 0 && prev_avg_henry > 0.0 && prev_avg_krylov > 0.0 && prev_avg_inverse > 0.0) {
+            // Calculate exponents
+            double exp_henry = std::log(avg_henry / prev_avg_henry) / std::log((double)N / prev_N);
+            double exp_krylov = std::log(avg_krylov / prev_avg_krylov) / std::log((double)N / prev_N);
+            double exp_inverse = std::log(avg_inverse / prev_avg_inverse) / std::log((double)N / prev_N);
+
+            snprintf(buffer, sizeof(buffer), "%d\t%d\t%lf\t%lf\t|\t%lf\t%lf\t%.2fx\t|\t%lf\t%lf\t%.2fx\n",
+                N, num_trials, avg_henry, exp_henry, avg_krylov, exp_krylov, speedup_krylov, avg_inverse, exp_inverse, speedup_inverse);
+        }
+        else {
+            // First run, no previous data
+            snprintf(buffer, sizeof(buffer), "%d\t%d\t%lf\tN/A\t\t|\t%lf\tN/A\t\t%.2fx\t|\t%lf\tN/A\t\t%.2fx\n",
+                N, num_trials, avg_henry, avg_krylov, speedup_krylov, avg_inverse, speedup_inverse);
+        }
+
+        // 3. Send formatted buffer to both console and file
+        print_and_write(buffer);
+
+        // Store current values for the next iteration
+        prev_N = N;
+        prev_avg_henry = avg_henry;
+        prev_avg_krylov = avg_krylov;
+        prev_avg_inverse = avg_inverse;
+    }
+
+    print_and_write("=======================================================================================================================================\n");
+
+    // 4. Close the file and notify the user using the dynamic filename
+    outfile.close();
+    printf("Results successfully saved to '%s'\n", filename.c_str());
 }
 
 
 
+inline void Shamir_Shares_Generate(long long K, long long real, long long fake, long long s, long long t, vector<pair<long long, long long>>& Points, vector<vector<long long>>& M) {
+    /*
+    1. initiate Shamir-SS for a polynomial degree of t with random secret key K.
+    2. create real share and fake shares
+    3. create DHF matrix M
+    4. Mix positions
+    */
+
+    // 1
+    vector<long long> Shamir_Poly(t + 1);
+    Shamir_Poly[0] = K;
+    for (int i = 1; i < Shamir_Poly.size(); ++i)
+        Shamir_Poly[i] = get_rand(MOD);
+
+    // 2
+    Points.clear();
+    set<long long> x_cor;
+    while (x_cor.size() < real + fake)
+        x_cor.insert(get_rand(MOD));
+
+    for (auto a : x_cor) {
+        long long r = K;
+        for (int i = 1; i < t + 1; ++i)
+            r = (r + Shamir_Poly[i] * power(a, i)) % MOD;
+        Points.push_back({ a, r });
+    }
+
+    for (int i = 0; i < fake; ++i) {
+        long long rk = get_rand(MOD);
+        while (Points[i].second == rk)
+            rk = get_rand(MOD);
+        Points[i].second = rk; // Modify the Y-coordinate for fake shares
+    }
+
+    // 3
+    vector<vector<long long>> KM(s, vector<long long>(t));
+    M.clear();
+    for (int i = 0; i < s; ++i)
+        for (int j = 0; j < t; ++j)
+            KM[i][j] = get_rand(MOD);
+
+    for (int i = 0; i < fake; ++i) { // fake DHF value
+        vector<long long> r(s + 1);
+        r[0] = Points[i].first;
+        for (int j = 1; j <= s; ++j) // Only randomize the s auxiliary evaluations
+            r[j] = get_rand(MOD);
+        M.push_back(r);
+    }
+
+    for (int i = fake; i < real + fake; ++i) { // real DHF value
+        vector<long long> r(s + 1);
+        r[0] = Points[i].first;
+        for (int j = 0; j < s; ++j) {
+            long long temp = KM[j][0];
+            for (int l = 1; l < t; ++l)
+                temp = (temp + KM[j][l] * power(r[0], l)) % MOD;
+            r[j + 1] = temp;
+        }
+        M.push_back(r);
+    }
+
+    // 4
+    for (int i = 0; i < real + fake; ++i) {
+        int k = get_rand(fake + real);
+
+        auto T1 = Points[i];
+        Points[i] = Points[k];
+        Points[k] = T1;
+
+        auto T2 = M[i];
+        M[i] = M[k];
+        M[k] = T2;
+    }
+}
+
+inline long long Detection_Algorithm(long long s, long long t, vector<pair<long long, long long>>& Points, vector<vector<long long>>& v) {
+    long long m = v.size();
+    vector<vector<long long>> M(s + t, vector<long long>(m));
+
+    // 1. Construct the top Vandermonde basis rows
+    for (int i = 0; i < t; ++i)
+        for (int j = 0; j < m; ++j)
+            M[i][j] = power(v[j][0], i);
+
+    // 2. Append the s auxiliary polynomial rows
+    for (int i = t; i < t + s; ++i)
+        for (int j = 0; j < m; ++j)
+            M[i][j] = v[j][i - t + 1];
+
+    // 3. Compute Null Space
+    vector<vector<long long>> NL = Null_Space(M, false);
+    if (NL.empty())
+        return -1; // Trivial null space; not enough valid shares
+
+    vector<long long> b;
+    vector<vector<long long>> A;
+
+    // 4. Identify valid shares and collect exactly t+1 points
+    for (int i = 0; i < m && b.size() < t + 1; ++i) {
+        bool is_valid = false;
+        for (int k = 0; k < NL[i].size(); ++k) {
+            if (NL[i][k] != 0) {
+                is_valid = true;
+                break;
+            }
+        }
+
+        if (is_valid) {
+            b.push_back(Points[i].second);
+            vector<long long> tv;
+            for (int j = 0; j < t + 1; ++j)
+                tv.push_back(power(Points[i].first, j));
+            A.push_back(tv);
+        }
+    }
+    if (b.size() < t + 1)
+        return -1;
+
+    // 5. Reconstruct K
+    vector<long long> x = Ax_b(A, b);
+    return x[0]; // The secret K is the y-intercept (coefficient of x^0)
+}
+
+inline void testing() {
+    double avt = 0;
+    for (int trial = 1; trial < 1000000000; ++trial) {
+        vector<pair<long long, long long>> v;
+        vector<vector<long long>> M;
+        long long K = rand() % MOD, s = 1001, t = 10, real = 11, fake = 1000; //only when real > t, it is possible to reconstruct K 
+        bool possible = real > t;
+
+        auto start = chrono::high_resolution_clock::now();
+        Shamir_Shares_Generate(K, real, fake, s, t, v, M);
+        long long reconstructed_K = Detection_Algorithm(s, t, v, M);
+        auto end = chrono::high_resolution_clock::now();
+
+        if ((reconstructed_K == -1 && possible) || (possible && K != reconstructed_K)) {
+            printf("NOT GOOD...\n\n");
+            printf("original K      = %lld\nrecunstructed K = %lld\n", K, reconstructed_K);
+
+            exit(1);
+        }
+        printf("original K      = %lld\nrecunstructed K = %lld\n", K, reconstructed_K);
+        chrono::duration<double> e1 = end - start;
+        double d1 = (double)(e1.count());
+        avt += d1;
+        printf("-- %d\t\t%lf sec.\t\t(avg %lf sec)\n", trial, d1, avt / trial);
+    }
+}
+
 int main()
 {
-    //MOD = 1000000007;         //2*500000003         worst distributed
     //MOD = 100000007;          //2*491*101833
     //MOD = 100663291;          //2*3*3*3*5*7*13*16*241
     //MOD = 131071;             //2*3*5*17*257
-    //MOD = 524287;             //2*3*3*3*7*19*73     well distributed
+    //MOD = 524287;             //2*3*3*3*7*19*73
     //MOD = 65537;              //2^16
     //MOD = 653659;             //2*3*108943
     //MOD = 257;			    //2*2*2*2*2*2*2*2
     //MOD = 101;                //2*2*5*5
 
     //Safe primes
-    MOD = 565127;
+    //MOD = 565127;
+    //MOD = 1000000007;
 
 
-    Initiation();
+    //Initiation();
 
-    EX_B();
+    //EX_B();
+    //EX_C();
+
+
+
+    vector<long long> mod_values = {
+        100663291,  // 2*3*3*3*5*7*13*16*241
+        131071,     // 2*3*5*17*257
+        524287,     // 2*3*3*3*7*19*73
+
+        100000007,  // 2*491*101833
+        653659,     // 2*3*108943
+        565127,     // Safe prime
+    };
+
+    for (long long current_mod : mod_values) {
+        MOD = current_mod;
+
+        printf("\n======================================================================\n");
+        printf("Starting sequence for MOD = %lld\n", MOD);
+        printf("======================================================================\n\n");
+
+        Initiation();
+
+		EX_FULL();
+    }
+
+
+
+
+
+ //   MOD = 653659;
+	//Initiation();
+
+	//vector<vector<long long>> M = generate_test_matrix_gpu(3000, MOD);
+ //   
+ //   auto start_cpu = std::chrono::high_resolution_clock::now();
+ //   generate_test_matrix(3000, MOD);
+ //   auto end_cpu = std::chrono::high_resolution_clock::now();
+ //   std::chrono::duration<double, std::milli> time_cpu = end_cpu - start_cpu;
+
+ //   printf("CPU Time taken: %.3f ms\n\n", time_cpu.count());
+
+ //   auto start_gpu = std::chrono::high_resolution_clock::now();
+ //   generate_test_matrix_gpu(3000, MOD);
+ //   auto end_gpu = std::chrono::high_resolution_clock::now();
+ //   std::chrono::duration<double, std::milli> time_gpu = end_gpu - start_gpu;
+
+ //   printf("GPU Time taken: %.3f ms\n", time_gpu.count());
+
+
+ //   vector<vector<long long>> M = generate_test_matrix(5, MOD, false, true);
+	//vector<vector<long long>> D = I_n(5);
+	//D[0][0] = 3, D[1][1] = 2, D[2][2] = 4, D[3][3] = 1, D[4][4] = 0;
+ //   M = M * D * matrix_inverse(M);
+	//vector<vector<long long>> MP_1 = matrix_power(M, MOD - 1);
+ //   matrix_print(MP_1);
+ //   matrix_print(Null_Space(MP_1 - I_n(5), false));
+ //   matrix_print(Null_Space(MP_1, false));
+ //   matrix_print(Null_Space(M, false));
+
 
 
     return 0;
